@@ -21,6 +21,11 @@ It's built for the **Samsung Galaxy Z Fold** family and works on any Android 10+
 | Sounds | Drum Rack kits, Drift, Melodic Sampler | 5 synthesised drum kits (19 drum voices); 2-oscillator synth with filter/envelopes/LFO/glide and 8 presets; chromatic sampler |
 | Sampling | mic sampling into pads / sampler | Record from the mic or import any audio file into a drum pad or sampler track; auto-trim and normalise |
 | Mixer & FX | volume, pan, sends | Volume, pan, mute/solo, meters; per-track filter and drive; shared tempo-synced delay and reverb; master limiter |
+| Arpeggiator | Move's arp | Up, down, up/down, as played, random, chord · 1/4–1/32 & triplets · 1–4 octaves · gate · latch; arp output is recorded |
+| Effects | Live devices | Chains of up to 6 effects per track and on the master: Auto Filter (synced LFO), Saturator, Redux, Chorus, Phaser, Compressor, EQ Three, Auto Pan, Echo, Reverb |
+| Sample editing | — | **Spectral sample editor** (iZotope Iris-style): spectrogram, rectangle / brush / time selections, attenuate · erase · boost · keep-only in the frequency domain, plus trim, delete, reverse, fades, normalise, gain, preview and undo |
+| Layout | — | Resizable areas: drag the dividers between session/editor, pads and step strip (remembered per screen) |
+| Touch & hold | — | Options on clips, scenes, tracks, pads, notes, effects, knobs and sets; multi-select clips (copy, paste, duplicate, quantize, launch, delete), notes (move by dragging, box-select, transpose, velocity, length, legato…) and sets |
 | Undo | ✓ | Undo / redo |
 | To Live | Ableton Cloud / Move Manager | **Export a zipped Live project** or just the `.als` via the share sheet or save to a folder; **open `.als` files** from Live |
 | Controllers | — | USB / Bluetooth MIDI controllers (keyboards, pad controllers, Move or Push in MIDI mode) play the selected track |

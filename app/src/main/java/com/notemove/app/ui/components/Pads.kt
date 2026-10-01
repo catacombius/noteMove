@@ -62,11 +62,16 @@ fun PadGrid(
     modifier: Modifier = Modifier,
     gap: Int = 6,
     slide: Boolean = true,
+    /** Called when a finger rests on one pad for [holdMillis] without sliding (the note is released first). */
+    onHold: ((PadSpec) -> Unit)? = null,
+    holdMillis: Long = 600,
 ) {
     val specFn by rememberUpdatedState(spec)
     val down by rememberUpdatedState(onDown)
     val up by rememberUpdatedState(onUp)
+    val hold by rememberUpdatedState(onHold)
     val active = remember { HashMap<PointerId, PadSpec>() }
+    val downAt = remember { HashMap<PointerId, Long>() }
     BoxWithConstraints(modifier) {
         val gapPx = with(androidx.compose.ui.platform.LocalDensity.current) { gap.dp.toPx() }
         Column(
@@ -75,7 +80,19 @@ fun PadGrid(
                 .pointerInput(rows, cols) {
                     awaitPointerEventScope {
                         while (true) {
-                            val event = awaitPointerEvent()
+                            // Poll while fingers are down so a motionless hold can be detected.
+                            val event = if (hold != null && active.isNotEmpty()) withTimeoutOrNull(50L) { awaitPointerEvent() } else awaitPointerEvent()
+                            if (event == null) {
+                                val now = System.currentTimeMillis()
+                                for ((id, padSpec) in active.entries.toList()) {
+                                    if (now - (downAt[id] ?: now) >= holdMillis) {
+                                        active.remove(id); downAt.remove(id)
+                                        up(padSpec)
+                                        hold?.invoke(padSpec)
+                                    }
+                                }
+                                continue
+                            }
                             val w = size.width.toFloat()
                             val h = size.height.toFloat()
                             val cellW = (w + gapPx) / cols
@@ -91,15 +108,18 @@ fun PadGrid(
                                 if (c.pressed) {
                                     if (prev == null && !c.previousPressed && hit != null) {
                                         active[c.id] = hit
+                                        downAt[c.id] = System.currentTimeMillis()
                                         down(hit, velocityFor(c.pressure, (y - rowFromTop * cellH) / (cellH - gapPx)))
                                     } else if (prev != null && slide && hit != null && hit.id != prev.id) {
                                         up(prev)
                                         active[c.id] = hit
+                                        downAt[c.id] = System.currentTimeMillis()
                                         down(hit, velocityFor(c.pressure, (y - rowFromTop * cellH) / (cellH - gapPx)))
                                     }
                                     c.consume()
                                 } else if (prev != null) {
                                     active.remove(c.id)
+                                    downAt.remove(c.id)
                                     up(prev)
                                     c.consume()
                                 }

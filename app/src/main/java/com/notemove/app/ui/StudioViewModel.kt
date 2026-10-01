@@ -13,7 +13,11 @@ import com.notemove.app.midi.MidiInput
 import com.notemove.core.dsp.SampleData
 import com.notemove.core.engine.EngineState
 import com.notemove.core.export.ProjectPackager
+import com.notemove.core.model.ArpSettings
 import com.notemove.core.model.BEATS_PER_BAR
+import com.notemove.core.model.EffectSlot
+import com.notemove.core.model.EffectType
+import com.notemove.core.model.MAX_EFFECTS
 import com.notemove.core.model.Clip
 import com.notemove.core.model.ClipOps
 import com.notemove.core.model.DRUM_BASE_NOTE
@@ -44,7 +48,13 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /** The views the editor area can show (bottom tabs on the outer screen, side tabs on the inner screen). */
-enum class Panel(val label: String) { SESSION("Session"), PLAY("Play"), EDIT("Edit"), SOUND("Sound"), MIX("Mix") }
+enum class Panel(val label: String) { SESSION("Session"), PLAY("Play"), EDIT("Edit"), SOUND("Sound"), FX("FX"), MIX("Mix") }
+
+/** A clip slot, used for multi-selection in the session grid. */
+data class SlotRef(val trackId: String, val scene: Int)
+
+/** Where an effect chain lives: a track, or the master bus (trackId == null). */
+data class FxTarget(val trackId: String?)
 
 data class StudioUi(
     val project: Project? = null,
@@ -68,6 +78,15 @@ data class StudioUi(
     val heldPitches: Set<Int> = emptySet(),
     val lastPlayedPitch: Int = 60,
     val message: String? = null,
+    /** Multi-selection of clip slots (touch & hold a clip, then tap others). */
+    val clipSelection: Set<SlotRef> = emptySet(),
+    /** Multi-selection of notes in the selected clip. */
+    val noteSelection: Set<Note> = emptySet(),
+    /** Multi-selection of sets in the library. */
+    val librarySelection: Set<String> = emptySet(),
+    /** Sample open in the spectral editor. */
+    val editingSampleId: String? = null,
+    val fxTarget: FxTarget = FxTarget(null),
 ) {
     val track: Track? get() = project?.tracks?.firstOrNull { it.id == selectedTrackId } ?: project?.tracks?.firstOrNull()
     val clip: Clip? get() = track?.clips?.get(selectedScene)
@@ -261,11 +280,11 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         if (prev != null && prev != id) {
             _ui.value.heldPitches.forEach { engine.noteOff(prev, it) }
         }
-        _ui.update { it.copy(selectedTrackId = id, heldPitches = emptySet(), stepPage = 0) }
+        _ui.update { it.copy(selectedTrackId = id, heldPitches = emptySet(), stepPage = 0, noteSelection = emptySet(), fxTarget = FxTarget(id)) }
         if (_ui.value.noteRepeat > 0) engine.setNoteRepeat(id, _ui.value.noteRepeat)
     }
 
-    fun selectScene(scene: Int) = _ui.update { it.copy(selectedScene = scene, stepPage = 0) }
+    fun selectScene(scene: Int) = _ui.update { it.copy(selectedScene = scene, stepPage = 0, noteSelection = emptySet()) }
     fun selectPad(pad: Int) = _ui.update { it.copy(selectedPad = pad) }
     fun setPanel(p: Panel) = _ui.update { it.copy(panel = p) }
     fun setOctave(o: Int) = _ui.update { it.copy(octave = o.coerceIn(-1, 7)) }
@@ -600,4 +619,309 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun resetExport() { _export.value = ExportState.Idle }
+
+    // ------------------------------------------------------------------ layout (resizable panes)
+
+    private val prefs = application.getSharedPreferences("layout", android.content.Context.MODE_PRIVATE)
+    private val _splits = MutableStateFlow(prefs.all.mapNotNull { (k, v) -> (v as? Float)?.let { k to it } }.toMap())
+    val splits: StateFlow<Map<String, Float>> = _splits.asStateFlow()
+
+    fun setSplit(key: String, fraction: Float) {
+        _splits.update { it + (key to fraction) }
+        prefs.edit().putFloat(key, fraction).apply()
+    }
+
+    fun resetSplits() { _splits.value = emptyMap(); prefs.edit().clear().apply() }
+
+    // ------------------------------------------------------------------ arpeggiator
+
+    fun setArp(f: (ArpSettings) -> ArpSettings) {
+        val t = _ui.value.track ?: return
+        // Release anything held so no note hangs when switching between arp and direct play.
+        _ui.value.heldPitches.forEach { engine.noteOff(t.id, it) }
+        _ui.update { it.copy(heldPitches = emptySet()) }
+        edit { p -> p.updateTrack(t.id) { it.copy(arp = f(it.arp)) } }
+    }
+
+    // ------------------------------------------------------------------ effects
+
+    fun setFxTarget(target: FxTarget) = _ui.update { it.copy(fxTarget = target) }
+
+    fun effectsOf(p: Project, target: FxTarget): List<EffectSlot> =
+        if (target.trackId == null) p.masterEffects else p.track(target.trackId)?.effects ?: emptyList()
+
+    private fun editEffects(target: FxTarget, undoable: Boolean = true, f: (List<EffectSlot>) -> List<EffectSlot>) = edit(undoable) { p ->
+        if (target.trackId == null) p.copy(masterEffects = f(p.masterEffects))
+        else p.updateTrack(target.trackId) { it.copy(effects = f(it.effects)) }
+    }
+
+    fun addEffect(target: FxTarget, type: EffectType) {
+        val p = _ui.value.project ?: return
+        if (effectsOf(p, target).size >= MAX_EFFECTS) return toast("Up to $MAX_EFFECTS effects per chain")
+        editEffects(target) { it + EffectSlot(type = type) }
+    }
+
+    fun removeEffect(target: FxTarget, id: String) = editEffects(target) { l -> l.filter { it.id != id } }
+    fun toggleEffect(target: FxTarget, id: String) = editEffects(target) { l -> l.map { if (it.id == id) it.copy(enabled = !it.enabled) else it } }
+    fun setEffectValue(target: FxTarget, id: String, index: Int, v: Float) =
+        editEffects(target, undoable = false) { l -> l.map { if (it.id == id) it.with(index, v) else it } }
+    fun resetEffect(target: FxTarget, id: String) = editEffects(target) { l -> l.map { if (it.id == id) it.copy(values = it.type.defaults()) else it } }
+    fun duplicateEffect(target: FxTarget, id: String) {
+        val p = _ui.value.project ?: return
+        if (effectsOf(p, target).size >= MAX_EFFECTS) return toast("Up to $MAX_EFFECTS effects per chain")
+        editEffects(target) { l -> l.flatMap { if (it.id == id) listOf(it, it.copy(id = newId())) else listOf(it) } }
+    }
+    fun moveEffect(target: FxTarget, id: String, delta: Int) = editEffects(target) { l ->
+        val i = l.indexOfFirst { it.id == id }; val j = (i + delta).coerceIn(0, l.lastIndex)
+        if (i < 0 || i == j) l else l.toMutableList().apply { add(j, removeAt(i)) }
+    }
+
+    // ------------------------------------------------------------------ clip multi-selection & clipboard
+
+    private var clipClipboard: List<Triple<Int, Int, Clip>> = emptyList() // (track offset, scene offset, clip)
+    private var noteClipboard: List<Note> = emptyList()
+    val hasClipClipboard get() = clipClipboard.isNotEmpty()
+    val hasNoteClipboard get() = noteClipboard.isNotEmpty()
+
+    fun toggleClipSelection(ref: SlotRef) = _ui.update {
+        it.copy(clipSelection = if (ref in it.clipSelection) it.clipSelection - ref else it.clipSelection + ref)
+    }
+    fun clearClipSelection() = _ui.update { it.copy(clipSelection = emptySet()) }
+
+    fun selectClipsInScene(scene: Int) {
+        val p = _ui.value.project ?: return
+        _ui.update { it.copy(clipSelection = p.tracks.filter { t -> t.clips.containsKey(scene) }.map { t -> SlotRef(t.id, scene) }.toSet()) }
+    }
+
+    fun selectClipsInTrack(trackId: String) {
+        val t = _ui.value.project?.track(trackId) ?: return
+        _ui.update { it.copy(clipSelection = t.clips.keys.map { s -> SlotRef(trackId, s) }.toSet()) }
+    }
+
+    private fun selectedClips(p: Project) = _ui.value.clipSelection.mapNotNull { ref ->
+        val ti = p.tracks.indexOfFirst { it.id == ref.trackId }
+        val clip = p.tracks.getOrNull(ti)?.clips?.get(ref.scene)
+        if (clip == null) null else Triple(ti, ref.scene, clip)
+    }
+
+    fun copySelectedClips() {
+        val p = _ui.value.project ?: return
+        val sel = selectedClips(p)
+        if (sel.isEmpty()) return
+        val t0 = sel.minOf { it.first }; val s0 = sel.minOf { it.second }
+        clipClipboard = sel.map { Triple(it.first - t0, it.second - s0, it.third) }
+        toast("Copied ${sel.size} clip${if (sel.size > 1) "s" else ""}")
+    }
+
+    /** Pastes copied clips with their top-left corner at the selected slot. */
+    fun pasteClips() {
+        val s = _ui.value
+        val p = s.project ?: return
+        if (clipClipboard.isEmpty()) return
+        val ti0 = p.tracks.indexOfFirst { it.id == s.track?.id }.coerceAtLeast(0)
+        val needScenes = s.selectedScene + clipClipboard.maxOf { it.second } + 1
+        edit { pr ->
+            var out = pr.copy(sceneCount = maxOf(pr.sceneCount, minOf(needScenes, Project.MAX_SCENES)))
+            for ((dt, ds, clip) in clipClipboard) {
+                val t = out.tracks.getOrNull(ti0 + dt) ?: continue
+                val scene = s.selectedScene + ds
+                if (scene >= Project.MAX_SCENES) continue
+                out = out.updateTrack(t.id) { it.withClip(scene, clip.copy(id = newId())) }
+            }
+            out
+        }
+    }
+
+    fun deleteSelectedClips() {
+        val sel = _ui.value.clipSelection
+        sel.map { it.trackId }.distinct().forEach { engine.stopTrack(it) }
+        edit { p -> sel.fold(p) { acc, ref -> acc.updateTrack(ref.trackId) { it.withClip(ref.scene, null) } } }
+        clearClipSelection()
+    }
+
+    fun duplicateSelectedClips() {
+        copySelectedClips()
+        val p = _ui.value.project ?: return
+        val sel = selectedClips(p)
+        if (sel.isEmpty()) return
+        val span = sel.maxOf { it.second } - sel.minOf { it.second } + 1
+        val t0 = sel.minOf { it.first }
+        _ui.update { it.copy(selectedTrackId = p.tracks[t0].id, selectedScene = sel.minOf { c -> c.second } + span) }
+        pasteClips()
+        clearClipSelection()
+    }
+
+    fun quantizeSelectedClips(grid: Double) = edit { p ->
+        _ui.value.clipSelection.fold(p) { acc, ref ->
+            acc.updateTrack(ref.trackId) { t -> t.clips[ref.scene]?.let { t.withClip(ref.scene, ClipOps.quantize(it, grid)) } ?: t }
+        }
+    }
+
+    fun launchSelectedClips() = _ui.value.clipSelection.forEach { engine.launchClip(it.trackId, it.scene) }
+
+    // ------------------------------------------------------------------ note multi-selection
+
+    fun setNoteSelection(notes: Set<Note>) = _ui.update { it.copy(noteSelection = notes) }
+    fun toggleNoteSelection(n: Note) = _ui.update { it.copy(noteSelection = if (n in it.noteSelection) it.noteSelection - n else it.noteSelection + n) }
+    fun clearNoteSelection() = _ui.update { it.copy(noteSelection = emptySet()) }
+    fun selectAllNotes() = _ui.update { it.copy(noteSelection = it.clip?.notes?.toSet() ?: emptySet()) }
+
+    /** Applies [f] to the selected notes (or all notes when nothing is selected) and keeps them selected. */
+    fun transformNotes(undoable: Boolean = true, f: (Note) -> Note?) {
+        val s = _ui.value
+        val clip = s.clip ?: return
+        val targets = s.noteSelection.ifEmpty { clip.notes.toSet() }
+        val newSel = HashSet<Note>()
+        val out = clip.notes.mapNotNull { n ->
+            if (n in targets) f(n)?.also { if (s.noteSelection.isNotEmpty()) newSel.add(it) } else n
+        }
+        editClip(undoable) { it.withNotes(out) }
+        _ui.update { it.copy(noteSelection = newSel) }
+    }
+
+    fun deleteSelectedNotes() {
+        val sel = _ui.value.noteSelection
+        if (sel.isEmpty()) return
+        editClip { c -> c.withNotes(c.notes.filter { it !in sel }) }
+        clearNoteSelection()
+    }
+
+    fun copyNotes() {
+        val s = _ui.value
+        val notes = s.noteSelection.ifEmpty { s.clip?.notes?.toSet() ?: emptySet() }
+        if (notes.isEmpty()) return
+        val t0 = notes.minOf { it.start }
+        noteClipboard = notes.map { it.copy(start = it.start - t0) }
+        toast("Copied ${notes.size} notes")
+    }
+
+    /** Pastes at the end of the current selection (or at the start of the clip). */
+    fun pasteNotes() {
+        val s = _ui.value
+        val clip = s.clip ?: return
+        if (noteClipboard.isEmpty()) return
+        val at = s.noteSelection.maxOfOrNull { it.end }?.let { ClipOps.snap(it, s.stepGrid) } ?: 0.0
+        val pasted = noteClipboard.map { it.copy(start = (it.start + at) % clip.lengthBeats) }
+        editClip { c -> c.withNotes(c.notes + pasted) }
+        _ui.update { it.copy(noteSelection = pasted.toSet()) }
+    }
+
+    fun duplicateSelectedNotes() {
+        val s = _ui.value
+        val clip = s.clip ?: return
+        val sel = s.noteSelection
+        if (sel.isEmpty()) return
+        val span = ClipOps.snap(sel.maxOf { it.end } - sel.minOf { it.start }, s.stepGrid).coerceAtLeast(s.stepGrid)
+        val copies = sel.map { it.copy(start = (it.start + span) % clip.lengthBeats) }
+        editClip { c -> c.withNotes(c.notes + copies) }
+        _ui.update { it.copy(noteSelection = copies.toSet()) }
+    }
+
+    fun legatoSelectedNotes() {
+        val s = _ui.value
+        val clip = s.clip ?: return
+        val sel = s.noteSelection.ifEmpty { clip.notes.toSet() }
+        val starts = clip.notes.map { it.start }.distinct().sorted()
+        transformNotes { n ->
+            if (n !in sel) n else {
+                val next = starts.firstOrNull { it > n.start + 1e-6 } ?: clip.lengthBeats
+                n.copy(duration = next - n.start)
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ library multi-selection
+
+    fun toggleLibrarySelection(id: String) = _ui.update {
+        it.copy(librarySelection = if (id in it.librarySelection) it.librarySelection - id else it.librarySelection + id)
+    }
+    fun clearLibrarySelection() = _ui.update { it.copy(librarySelection = emptySet()) }
+    fun deleteSelectedProjects() {
+        val ids = _ui.value.librarySelection
+        viewModelScope.launch(Dispatchers.IO) { ids.forEach(repo::delete); _library.value = repo.list() }
+        clearLibrarySelection()
+    }
+    fun duplicateSelectedProjects() {
+        val ids = _ui.value.librarySelection
+        val names = _library.value.associate { it.id to it.name }
+        viewModelScope.launch(Dispatchers.IO) { ids.forEach { repo.duplicate(it, "${names[it] ?: "Set"} copy") }; _library.value = repo.list() }
+        clearLibrarySelection()
+    }
+
+    // ------------------------------------------------------------------ sample editor
+
+    /** Sample used by the selected sampler track or drum pad. */
+    fun currentSampleId(): String? {
+        val t = _ui.value.track ?: return null
+        return when (t.kind) {
+            TrackKind.SAMPLER -> t.sampler?.sampleId
+            TrackKind.DRUMS -> t.drumKit?.pads?.getOrNull(_ui.value.selectedPad)?.sampleId
+            TrackKind.SYNTH -> null
+        }
+    }
+
+    fun openSampleEditor(sampleId: String? = currentSampleId()) {
+        if (sampleId == null || engine.samples[sampleId] == null) return toast("Load or record a sample first")
+        _ui.update { it.copy(editingSampleId = sampleId) }
+    }
+
+    fun closeSampleEditor() { engine.stopPreview(); _ui.update { it.copy(editingSampleId = null) } }
+
+    fun sampleData(id: String): SampleData? = engine.samples[id]
+
+    /** Replaces a sample's audio everywhere it is used (and on disk). */
+    fun replaceSample(id: String, data: FloatArray) {
+        val p = _ui.value.project ?: return
+        val ref = p.sample(id) ?: return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                repo.sampleFile(p.id, ref.fileName).outputStream().use { com.notemove.core.export.Wav.write(it, engine.sampleRate, data, null, 24) }
+            }
+            engine.samples.put(id, SampleData(data, engine.sampleRate))
+            edit { pr -> pr.copy(samples = pr.samples.map { if (it.id == id) it.copy(frames = data.size, sampleRate = engine.sampleRate) else it }) }
+            toast("Sample saved")
+        }
+    }
+
+    /** Saves edited audio as a new sample and assigns it to the current pad / sampler. */
+    fun saveSampleAsNew(name: String, data: FloatArray) = assignSample(name, data)
+
+    /** Sets the sampler's start/end (fractions) from a selection in the editor. */
+    fun setSamplerRegion(start: Float, end: Float) {
+        val t = _ui.value.track ?: return
+        if (t.kind != TrackKind.SAMPLER) return
+        setSampler((t.sampler ?: SamplerPatch()).copy(start = start, end = end), undoable = true)
+    }
+
+    // ------------------------------------------------------------------ gestures support
+
+    /** Pushes an undo step before a continuous gesture (dragging notes) that edits without undo. */
+    fun checkpoint() {
+        _ui.value.project?.let { undo.addLast(it); if (undo.size > 100) undo.removeFirst(); redo.clear() }
+        _ui.update { it.copy(canUndo = undo.isNotEmpty(), canRedo = false) }
+    }
+
+    /** Swaps [old] notes for [new] ones (moving a selection) and selects the new ones. */
+    fun replaceNotes(old: Set<Note>, new: List<Note>) {
+        editClip(undoable = false) { c -> c.withNotes(c.notes.filter { it !in old } + new) }
+        _ui.update { it.copy(noteSelection = new.toSet()) }
+    }
+
+    private var padClipboard: DrumPad? = null
+    val hasPadClipboard get() = padClipboard != null
+
+    fun copyPad(index: Int) {
+        padClipboard = _ui.value.track?.drumKit?.pads?.getOrNull(index)
+        toast("Copied pad ${index + 1}")
+    }
+
+    fun pastePad(index: Int) {
+        val pad = padClipboard ?: return
+        setPad(index, pad, undoable = true)
+    }
+
+    fun clearPadNotes(index: Int) {
+        val pitch = DRUM_BASE_NOTE + index
+        editClip { c -> c.withNotes(c.notes.filter { it.pitch != pitch }) }
+    }
 }

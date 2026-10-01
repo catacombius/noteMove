@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -74,7 +75,22 @@ fun LibraryScreen(vm: StudioViewModel, ui: StudioUi, layout: DeviceLayout) {
                     Text("Sketch on the go · finish in Ableton Live", fontSize = 13.sp, color = NM.textDim)
                 }
             }
-            Row(Modifier.padding(vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (ui.librarySelection.isNotEmpty()) {
+                var confirm by remember { mutableStateOf(false) }
+                Row(Modifier.padding(vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(vm::clearLibrarySelection) { Text("✕ ${ui.librarySelection.size} selected") }
+                    OutlinedButton(vm::duplicateSelectedProjects) { Text("Duplicate") }
+                    Button({ confirm = true }) { Text("Delete") }
+                }
+                if (confirm) AlertDialog(
+                    onDismissRequest = { confirm = false },
+                    confirmButton = { TextButton({ confirm = false; vm.deleteSelectedProjects() }) { Text("Delete", color = NM.record) } },
+                    dismissButton = { TextButton({ confirm = false }) { Text("Cancel") } },
+                    title = { Text("Delete ${ui.librarySelection.size} sets?") },
+                    text = { Text("They are removed from this phone with their samples.") },
+                    containerColor = NM.surface,
+                )
+            } else Row(Modifier.padding(vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button({ creating = true }) { Text("+ New set") }
                 OutlinedButton({ importer.launch(arrayOf("*/*")) }) { Text("Open .als / set…") }
             }
@@ -92,7 +108,7 @@ fun LibraryScreen(vm: StudioViewModel, ui: StudioUi, layout: DeviceLayout) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                items(sets, key = { it.id }) { s -> SetCard(vm, s) }
+                items(sets, key = { it.id }) { s -> SetCard(vm, s, s.id in ui.librarySelection, ui.librarySelection.isNotEmpty()) }
             }
         }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).safeDrawingPadding())
@@ -112,13 +128,14 @@ fun LibraryScreen(vm: StudioViewModel, ui: StudioUi, layout: DeviceLayout) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SetCard(vm: StudioViewModel, s: ProjectSummary) {
+private fun SetCard(vm: StudioViewModel, s: ProjectSummary, selected: Boolean, selecting: Boolean) {
     var menu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     Box {
         Column(
-            Modifier.fillMaxWidth().height(110.dp).clip(RoundedCornerShape(12.dp)).background(NM.surface)
-                .combinedClickable(onClick = { vm.openProject(s.id) }, onLongClick = { menu = true })
+            Modifier.fillMaxWidth().height(110.dp).clip(RoundedCornerShape(12.dp)).background(if (selected) NM.surfaceHigh else NM.surface)
+                .border(2.dp, if (selected) NM.solo else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(12.dp))
+                .combinedClickable(onClick = { if (selecting) vm.toggleLibrarySelection(s.id) else vm.openProject(s.id) }, onLongClick = { menu = true })
                 .padding(14.dp),
         ) {
             Text(s.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = NM.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -129,6 +146,7 @@ private fun SetCard(vm: StudioViewModel, s: ProjectSummary) {
         }
         DropdownMenu(menu, { menu = false }) {
             DropdownMenuItem({ Text("Open") }, { menu = false; vm.openProject(s.id) })
+            DropdownMenuItem({ Text(if (selected) "Deselect" else "Select (multi)") }, { menu = false; vm.toggleLibrarySelection(s.id) })
             DropdownMenuItem({ Text("Duplicate") }, { menu = false; vm.duplicateProject(s.id, "${s.name} copy") })
             DropdownMenuItem({ Text("Delete", color = NM.record) }, { menu = false; confirmDelete = true })
         }

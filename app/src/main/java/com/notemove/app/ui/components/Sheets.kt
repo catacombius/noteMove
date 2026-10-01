@@ -114,6 +114,11 @@ fun SettingsSheet(vm: StudioViewModel, ui: StudioUi, onDismiss: () -> Unit) {
                 else devices.joinToString(" · "),
                 fontSize = 12.sp, color = NM.textDim,
             )
+            SectionTitle("Layout")
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Drag the dividers between areas to resize them; double-tap a divider to reset it.", fontSize = 12.sp, color = NM.textDim, modifier = Modifier.weight(1f))
+                Chip("Reset layout", false, vm::resetSplits)
+            }
             SectionTitle("Audio")
             Text("Output latency ≈ ${vm.latencyMs.toInt()} ms · ${vm.engine.sampleRate} Hz", fontSize = 12.sp, color = NM.textDim)
             Spacer(Modifier.height(24.dp))

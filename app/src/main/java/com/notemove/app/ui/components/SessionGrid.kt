@@ -44,6 +44,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.notemove.app.ui.SlotRef
 import com.notemove.app.ui.StudioUi
 import com.notemove.app.ui.StudioViewModel
 import com.notemove.app.ui.theme.NM
@@ -77,6 +78,7 @@ fun SessionGrid(
     val vScroll = rememberScrollState()
 
     Column(modifier) {
+        if (ui.clipSelection.isNotEmpty()) ClipSelectionBar(vm, ui)
         // Track headers
         Row(Modifier.horizontalScroll(hScroll), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             for (t in project.tracks) TrackHeader(vm, t, t.id == ui.track?.id, colWidth, onEditTrack)
@@ -145,6 +147,7 @@ private fun TrackHeader(vm: StudioViewModel, t: Track, selected: Boolean, width:
         }
         DropdownMenu(menu, { menu = false }) {
             DropdownMenuItem({ Text("Edit track…") }, { menu = false; onEdit(t) })
+            DropdownMenuItem({ Text("Select all clips") }, { menu = false; vm.selectClipsInTrack(t.id) })
             DropdownMenuItem({ Text(if (t.mute) "Unmute" else "Mute") }, { menu = false; vm.toggleMute(t.id) })
             DropdownMenuItem({ Text(if (t.solo) "Unsolo" else "Solo") }, { menu = false; vm.toggleSolo(t.id) })
             DropdownMenuItem({ Text("Duplicate") }, { menu = false; vm.duplicateTrack(t.id) })
@@ -179,6 +182,9 @@ private fun ClipSlot(
 ) {
     val clip = t.clips[scene]
     val selected = ui.track?.id == t.id && ui.selectedScene == scene
+    val ref = SlotRef(t.id, scene)
+    val multi = ui.clipSelection.isNotEmpty()
+    val inSelection = ref in ui.clipSelection
     val color = NM.track(t.color)
     var menu by remember { mutableStateOf(false) }
     Box {
@@ -192,12 +198,24 @@ private fun ClipSlot(
                     },
                 )
                 .border(
-                    if (selected) 2.dp else if (queued) 2.dp else 0.dp,
-                    if (queued && blink) NM.queued else if (selected) NM.text else Color.Transparent,
+                    if (selected || queued || inSelection) 2.dp else 0.dp,
+                    when {
+                        inSelection -> NM.solo
+                        queued && blink -> NM.queued
+                        selected -> NM.text
+                        else -> Color.Transparent
+                    },
                     RoundedCornerShape(6.dp),
                 )
                 .combinedClickable(
-                    onClick = { if (clip != null) vm.launchClip(t.id, scene) else { vm.selectTrack(t.id); vm.selectScene(scene) } },
+                    onClick = {
+                        when {
+                            multi && clip != null -> vm.toggleClipSelection(ref)
+                            multi -> { vm.selectTrack(t.id); vm.selectScene(scene) } // paste target
+                            clip != null -> vm.launchClip(t.id, scene)
+                            else -> { vm.selectTrack(t.id); vm.selectScene(scene) }
+                        }
+                    },
                     onLongClick = { vm.selectTrack(t.id); vm.selectScene(scene); menu = true },
                 )
                 .padding(horizontal = 6.dp),
@@ -218,8 +236,15 @@ private fun ClipSlot(
         DropdownMenu(menu, { menu = false }) {
             if (clip == null) {
                 for (bars in listOf(1, 2, 4, 8)) DropdownMenuItem({ Text("New $bars-bar clip") }, { menu = false; vm.createClip(t.id, scene, bars) })
+                if (vm.hasClipClipboard) DropdownMenuItem({ Text("Paste here") }, { menu = false; vm.pasteClips() })
             } else {
+                DropdownMenuItem({ Text(if (inSelection) "Deselect" else "Select (multi)") }, { menu = false; vm.toggleClipSelection(ref) })
+                DropdownMenuItem({ Text("Select all in scene") }, { menu = false; vm.selectClipsInScene(scene) })
+                DropdownMenuItem({ Text("Select all in track") }, { menu = false; vm.selectClipsInTrack(t.id) })
+                HorizontalDivider()
                 DropdownMenuItem({ Text("Launch") }, { menu = false; vm.launchClip(t.id, scene) })
+                DropdownMenuItem({ Text("Copy") }, { menu = false; vm.clearClipSelection(); vm.toggleClipSelection(ref); vm.copySelectedClips(); vm.clearClipSelection() })
+                if (vm.hasClipClipboard) DropdownMenuItem({ Text("Paste here") }, { menu = false; vm.pasteClips() })
                 DropdownMenuItem({ Text("Duplicate") }, { menu = false; vm.duplicateClip(t.id, scene) })
                 DropdownMenuItem({ Text("Double loop") }, { menu = false; vm.duplicateLoop() })
                 DropdownMenuItem({ Text("Quantize") }, { menu = false; vm.quantizeClip(ui.stepGrid) })
@@ -246,6 +271,7 @@ private fun SceneButton(vm: StudioViewModel, project: Project, scene: Int, selec
             Text(project.sceneName(scene), fontSize = 11.sp, color = NM.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         DropdownMenu(menu, { menu = false }) {
+            DropdownMenuItem({ Text("Select clips in scene") }, { menu = false; vm.selectClipsInScene(scene) })
             DropdownMenuItem({ Text("Duplicate scene") }, { menu = false; vm.duplicateScene(scene) })
             DropdownMenuItem({ Text("Insert empty scene below") }, {
                 menu = false
@@ -254,5 +280,23 @@ private fun SceneButton(vm: StudioViewModel, project: Project, scene: Int, selec
             HorizontalDivider()
             DropdownMenuItem({ Text("Delete scene", color = NM.record) }, { menu = false; vm.deleteScene(scene) })
         }
+    }
+}
+
+@Composable
+private fun ClipSelectionBar(vm: StudioViewModel, ui: StudioUi) {
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Chip("✕ ${ui.clipSelection.size} clips", true, vm::clearClipSelection, color = NM.solo)
+        Chip("Launch", false, vm::launchSelectedClips, color = NM.play)
+        Chip("Copy", false, vm::copySelectedClips)
+        if (vm.hasClipClipboard) Chip("Paste at slot", false, vm::pasteClips)
+        Chip("Duplicate", false, vm::duplicateSelectedClips)
+        Chip("Quantize", false, { vm.quantizeSelectedClips(ui.stepGrid) })
+        Chip("Delete", false, vm::deleteSelectedClips, color = NM.record)
+        Text("tap clips to add/remove", fontSize = 11.sp, color = NM.textDim)
     }
 }

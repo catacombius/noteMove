@@ -147,6 +147,7 @@ private fun DrumEditor(vm: StudioViewModel, ui: StudioUi, onSample: () -> Unit) 
             Chip(s.label, pad.sound == s, { vm.setPad(idx, pad.copy(sound = s, name = if (s == DrumSound.SAMPLE) pad.name else s.label), true); vm.auditionPad(idx) }, color = color)
         }
         Chip("Sample…", false, onSample, color = color)
+        pad.sampleId?.let { sid -> Chip("Edit sample…", false, { vm.openSampleEditor(sid) }, color = color) }
     }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Knob("Tune", (pad.tune + 24) / 48f, { vm.setPad(idx, pad.copy(tune = it * 48 - 24)) }, color = color, bipolar = true,
@@ -173,6 +174,7 @@ private fun SamplerEditor(vm: StudioViewModel, ui: StudioUi, onSample: () -> Uni
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(project.sample(p.sampleId)?.name ?: "No sample loaded", color = NM.text, fontSize = 14.sp)
         Chip("Record / Load…", false, onSample, color = color)
+        p.sampleId?.let { sid -> Chip("Edit (spectral)…", false, { vm.openSampleEditor(sid) }, color = color) }
     }
     Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         ToggleBox("Loop", p.loop, { vm.setSampler(p.copy(loop = !p.loop), true) }, onColor = color)

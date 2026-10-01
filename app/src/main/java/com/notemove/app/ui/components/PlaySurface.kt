@@ -3,6 +3,7 @@ package com.notemove.app.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,6 +40,7 @@ import com.notemove.app.ui.StudioUi
 import com.notemove.app.ui.StudioViewModel
 import com.notemove.app.ui.theme.NM
 import com.notemove.core.engine.EngineState
+import com.notemove.core.model.ArpMode
 import com.notemove.core.model.Clip
 import com.notemove.core.model.ClipOps
 import com.notemove.core.model.DRUM_BASE_NOTE
@@ -72,31 +74,54 @@ fun playheadIn(state: EngineState, track: Track?, scene: Int, clip: Clip?): Doub
  * (Move layout) the right 4x4 block plays the selected drum at 16 velocities, as on Push.
  */
 @Composable
-fun PlaySurface(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, rows: Int, cols: Int, modifier: Modifier = Modifier) {
+fun PlaySurface(
+    vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, rows: Int, cols: Int, modifier: Modifier = Modifier,
+    onSample: () -> Unit = {},
+) {
     val project = ui.project ?: return
     val track = ui.track ?: return
     val sounding = soundingPitches(engine.value, track)
-    if (track.kind == TrackKind.DRUMS) {
-        if (cols >= 8) {
-            Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    var holdPad by remember { mutableStateOf<Int?>(null) }
+    val onHoldDrum: (PadSpec) -> Unit = { s -> (s.id - DRUM_BASE_NOTE).takeIf { it in 0..15 }?.let { vm.selectPad(it); holdPad = it } }
+    Box(modifier) {
+        if (track.kind == TrackKind.DRUMS) {
+            if (cols >= 8) {
+                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    PadGrid(4, 4, { r, c -> PadLayouts.drumSpec(track, r * 4 + c, ui.heldPitches, sounding, ui.selectedPad) },
+                        onDown = { s, v -> vm.padDown(s.id, v) }, onUp = { vm.padUp(it.id) }, modifier = Modifier.weight(1f).fillMaxHeight(),
+                        onHold = onHoldDrum)
+                    val color = NM.track(track.color)
+                    val pitch = DRUM_BASE_NOTE + ui.selectedPad
+                    PadGrid(4, 4, { r, c ->
+                        val i = r * 4 + c
+                        PadSpec(1000 + i, if (i == 0 || i == 15) "${(i + 1) * 8 - 1}" else "", color.copy(alpha = 0.25f + 0.75f * (i + 1) / 16f),
+                            lit = false, accent = true)
+                    }, onDown = { s, _ -> vm.padDown(pitch, ((s.id - 1000) + 1) * 8 - 1) }, onUp = { vm.padUp(pitch) },
+                        modifier = Modifier.weight(1f).fillMaxHeight(), slide = false)
+                }
+            } else {
                 PadGrid(4, 4, { r, c -> PadLayouts.drumSpec(track, r * 4 + c, ui.heldPitches, sounding, ui.selectedPad) },
-                    onDown = { s, v -> vm.padDown(s.id, v) }, onUp = { vm.padUp(it.id) }, modifier = Modifier.weight(1f).fillMaxHeight())
-                val color = NM.track(track.color)
-                val pitch = DRUM_BASE_NOTE + ui.selectedPad
-                PadGrid(4, 4, { r, c ->
-                    val i = r * 4 + c
-                    PadSpec(1000 + i, if (i == 0 || i == 15) "${(i + 1) * 8 - 1}" else "", color.copy(alpha = 0.25f + 0.75f * (i + 1) / 16f),
-                        lit = false, accent = true)
-                }, onDown = { s, _ -> vm.padDown(pitch, ((s.id - 1000) + 1) * 8 - 1) }, onUp = { vm.padUp(pitch) },
-                    modifier = Modifier.weight(1f).fillMaxHeight(), slide = false)
+                    onDown = { s, v -> vm.padDown(s.id, v) }, onUp = { vm.padUp(it.id) }, modifier = Modifier.fillMaxSize(), onHold = onHoldDrum)
             }
         } else {
-            PadGrid(4, 4, { r, c -> PadLayouts.drumSpec(track, r * 4 + c, ui.heldPitches, sounding, ui.selectedPad) },
-                onDown = { s, v -> vm.padDown(s.id, v) }, onUp = { vm.padUp(it.id) }, modifier = modifier)
+            PadGrid(rows, cols, { r, c -> PadLayouts.melodicSpec(project, track, r, c, ui.octave, ui.inKey, ui.heldPitches, sounding) },
+                onDown = { s, v -> vm.padDown(s.id, v) }, onUp = { vm.padUp(it.id) }, modifier = Modifier.fillMaxSize())
         }
-    } else {
-        PadGrid(rows, cols, { r, c -> PadLayouts.melodicSpec(project, track, r, c, ui.octave, ui.inKey, ui.heldPitches, sounding) },
-            onDown = { s, v -> vm.padDown(s.id, v) }, onUp = { vm.padUp(it.id) }, modifier = modifier)
+        // Touch & hold a drum pad for its options.
+        val hp = holdPad
+        DropdownMenu(hp != null, { holdPad = null }) {
+            if (hp != null) {
+                val pad = track.drumKit?.pads?.getOrNull(hp)
+                Text("  Pad ${hp + 1} · ${pad?.name ?: ""}", fontSize = 12.sp, color = NM.textDim)
+                DropdownMenuItem({ Text("Edit sound") }, { holdPad = null; vm.setPanel(com.notemove.app.ui.Panel.SOUND) })
+                DropdownMenuItem({ Text("Sample into pad…") }, { holdPad = null; onSample() })
+                if (pad?.sampleId != null) DropdownMenuItem({ Text("Edit sample (spectral)") }, { holdPad = null; vm.openSampleEditor(pad.sampleId) })
+                DropdownMenuItem({ Text("Steps for this pad") }, { holdPad = null; vm.setPanel(com.notemove.app.ui.Panel.EDIT) })
+                DropdownMenuItem({ Text("Copy pad") }, { holdPad = null; vm.copyPad(hp) })
+                if (vm.hasPadClipboard) DropdownMenuItem({ Text("Paste pad") }, { holdPad = null; vm.pastePad(hp) })
+                DropdownMenuItem({ Text("Clear pad's notes in clip") }, { holdPad = null; vm.clearPadNotes(hp) })
+            }
+        }
     }
 }
 
@@ -130,6 +155,7 @@ fun PadToolbar(vm: StudioViewModel, ui: StudioUi, modifier: Modifier = Modifier)
                 }
             }
         }
+        ArpButton(vm, track)
         ToggleBox("Fixed Vel", ui.fixedVelocity, vm::toggleFixedVelocity)
         ToggleBox("Capture", false, vm::capture, onColor = NM.play)
     }
@@ -193,4 +219,56 @@ fun StepStrip(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, mod
             if (r == 0 && perRow == 8) Spacer(Modifier.height(4.dp))
         }
     }
+}
+
+/** Arp on/off; touch & hold (or tap the arrow) for its settings. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun ArpButton(vm: StudioViewModel, track: Track) {
+    val a = track.arp
+    var menu by remember { mutableStateOf(false) }
+    val color = NM.track(track.color)
+    Box {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            Box(
+                Modifier.clip(RoundedCornerShape(6.dp))
+                    .border(1.dp, if (a.enabled) color else NM.line, RoundedCornerShape(6.dp))
+                    .background(if (a.enabled) color.copy(alpha = 0.25f) else Color.Transparent)
+                    .combinedClickable(onClick = { vm.setArp { it.copy(enabled = !it.enabled) } }, onLongClick = { menu = true })
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            ) {
+                Text(if (a.enabled) "Arp ${a.mode.label} ${rateLabel(a.rate)}" else "Arp", fontSize = 12.sp,
+                    color = if (a.enabled) color else NM.textDim, fontWeight = FontWeight.Bold)
+            }
+            Text("▾", Modifier.clickable { menu = true }.padding(4.dp), color = NM.textDim, fontSize = 12.sp)
+        }
+        DropdownMenu(menu, { menu = false }) {
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp).width(300.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Arpeggiator", fontWeight = FontWeight.SemiBold, color = NM.text, modifier = Modifier.weight(1f))
+                    ToggleBox(if (a.enabled) "ON" else "OFF", a.enabled, { vm.setArp { it.copy(enabled = !it.enabled) } }, onColor = color)
+                }
+                SectionTitle("Mode")
+                FlowRowCompat { for (m in ArpMode.entries) Chip(m.label, a.mode == m, { vm.setArp { it.copy(mode = m) } }, color = color) }
+                SectionTitle("Rate")
+                FlowRowCompat {
+                    for ((r, label) in listOf(1.0 to "1/4", 0.5 to "1/8", 1.0 / 3 to "1/8T", 0.25 to "1/16", 1.0 / 6 to "1/16T", 0.125 to "1/32")) {
+                        Chip(label, kotlin.math.abs(a.rate - r) < 1e-6, { vm.setArp { it.copy(rate = r) } }, color = color)
+                    }
+                }
+                SectionTitle("Octaves")
+                FlowRowCompat { for (o in 1..4) Chip("$o", a.octaves == o, { vm.setArp { it.copy(octaves = o) } }, color = color) }
+                SectionTitle("Gate ${(a.gate * 100).toInt()}%")
+                androidx.compose.material3.Slider(a.gate, { g -> vm.setArp { it.copy(gate = g) } }, valueRange = 0.1f..1f)
+                ToggleBox("Latch (keeps playing after release)", a.latch, { vm.setArp { it.copy(latch = !it.latch) } }, onColor = color)
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun FlowRowCompat(content: @Composable () -> Unit) {
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { content() }
 }

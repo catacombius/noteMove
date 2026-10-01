@@ -16,9 +16,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,7 +60,9 @@ fun Knob(
 ) {
     val current by rememberUpdatedState(value)
     val change by rememberUpdatedState(onChange)
+    var menu by remember { mutableStateOf(false) }
     Column(modifier.width(size + 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box {
         Canvas(
             Modifier
                 .size(size)
@@ -65,7 +72,7 @@ fun Knob(
                         change((current - dy / (size.toPx() * 3.5f)).coerceIn(0f, 1f))
                     }
                 }
-                .pointerInput(default) { detectTapGestures(onDoubleTap = { change(default) }) },
+                .pointerInput(default) { detectTapGestures(onDoubleTap = { change(default) }, onLongPress = { menu = true }) },
         ) {
             val stroke = 5.dp.toPx()
             val inset = stroke / 2 + 2f
@@ -78,6 +85,16 @@ fun Knob(
             val r = arcSize.width / 2 - stroke
             val c = center
             drawLine(NM.text, c, Offset(c.x + (r * kotlin.math.cos(angle)).toFloat(), c.y + (r * kotlin.math.sin(angle)).toFloat()), 3.dp.toPx(), StrokeCap.Round)
+        }
+        // Touch & hold a knob for precise values.
+        DropdownMenu(menu, { menu = false }) {
+            DropdownMenuItem({ Text("Reset (${display(default)})") }, { menu = false; change(default) })
+            DropdownMenuItem({ Text("Minimum") }, { menu = false; change(0f) })
+            DropdownMenuItem({ Text("Centre") }, { menu = false; change(0.5f) })
+            DropdownMenuItem({ Text("Maximum") }, { menu = false; change(1f) })
+            DropdownMenuItem({ Text("Fine +1%") }, { change((current + 0.01f).coerceAtMost(1f)) })
+            DropdownMenuItem({ Text("Fine −1%") }, { change((current - 0.01f).coerceAtLeast(0f)) })
+        }
         }
         Text(display(value), fontSize = 11.sp, color = NM.text, maxLines = 1)
         Text(label, fontSize = 10.sp, color = NM.textDim, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)

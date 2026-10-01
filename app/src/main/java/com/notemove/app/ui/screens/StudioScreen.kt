@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.GraphicEq
@@ -33,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,6 +50,9 @@ import com.notemove.app.ui.Panel
 import com.notemove.app.ui.StudioUi
 import com.notemove.app.ui.StudioViewModel
 import com.notemove.app.ui.components.Chip
+import com.notemove.app.ui.components.EffectsPanel
+import com.notemove.app.ui.components.SampleEditor
+import com.notemove.app.ui.components.SplitPane
 import com.notemove.app.ui.components.ClipEditor
 import com.notemove.app.ui.components.ExportSheet
 import com.notemove.app.ui.components.MixerPanel
@@ -97,6 +102,7 @@ fun StudioScreen(vm: StudioViewModel, ui: StudioUi, layout: DeviceLayout) {
     if (settings) SettingsSheet(vm, ui) { settings = false }
     if (export) ExportSheet(vm, ui) { export = false }
     if (sample) SampleSheet(vm, ui) { sample = false }
+    ui.editingSampleId?.let { SampleEditor(vm, ui, it) }
     editTrackId?.let { id -> ui.project?.track(id)?.let { TrackDialog(vm, it) { editTrackId = null } } ?: run { editTrackId = null } }
 }
 
@@ -113,6 +119,7 @@ private class StudioActions(
 
 @Composable
 private fun CoverLayout(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, a: StudioActions) {
+    val splits by vm.splits.collectAsState()
     Column(Modifier.fillMaxSize().safeDrawingPadding()) {
         TransportBar(vm, ui, engine, compact = true, onBack = vm::closeProject, onSettings = a.onSettings, onExport = a.onExport)
         TrackStrip(vm, ui, a)
@@ -121,11 +128,16 @@ private fun CoverLayout(vm: StudioViewModel, ui: StudioUi, engine: State<EngineS
                 Panel.SESSION -> SessionGrid(vm, ui, engine, Modifier.fillMaxSize(), colWidth = 86.dp, onEditTrack = { a.onEditTrack(it.id) })
                 Panel.PLAY -> Column(Modifier.fillMaxSize()) {
                     PadToolbar(vm, ui)
-                    PlaySurface(vm, ui, engine, rows = 6, cols = 4, modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp))
-                    StepStrip(vm, ui, engine, Modifier.fillMaxWidth().height(84.dp), rowsOf8 = true)
+                    SplitPane(
+                        splits["cover_steps"] ?: 0.8f, { vm.setSplit("cover_steps", it) }, vertical = true,
+                        modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp), default = 0.8f, minPane = 60.dp,
+                        first = { PlaySurface(vm, ui, engine, rows = 6, cols = 4, modifier = Modifier.fillMaxSize(), onSample = a.onSample) },
+                        second = { StepStrip(vm, ui, engine, Modifier.fillMaxSize(), rowsOf8 = true) },
+                    )
                 }
                 Panel.EDIT -> ClipEditor(vm, ui, engine, Modifier.fillMaxSize(), compact = true)
                 Panel.SOUND -> SoundPanel(vm, ui, a.onSample, Modifier.fillMaxSize())
+                Panel.FX -> EffectsPanel(vm, ui, Modifier.fillMaxSize())
                 Panel.MIX -> MixerPanel(vm, ui, engine, Modifier.fillMaxSize())
             }
         }
@@ -148,6 +160,7 @@ private fun iconFor(p: Panel): ImageVector = when (p) {
     Panel.PLAY -> Icons.Filled.GridOn
     Panel.EDIT -> Icons.Filled.Edit
     Panel.SOUND -> Icons.Filled.GraphicEq
+    Panel.FX -> Icons.Filled.AutoAwesome
     Panel.MIX -> Icons.Filled.Tune
 }
 
@@ -170,7 +183,7 @@ private fun TrackStrip(vm: StudioViewModel, ui: StudioUi, a: StudioActions) {
 // Inner screen: editor pane + Move-style pad surface.
 // ----------------------------------------------------------------------------------------------
 
-private val sidePanels = listOf(Panel.SESSION, Panel.EDIT, Panel.SOUND, Panel.MIX)
+private val sidePanels = listOf(Panel.SESSION, Panel.EDIT, Panel.SOUND, Panel.FX, Panel.MIX)
 
 @Composable
 private fun PanelTabs(vm: StudioViewModel, ui: StudioUi, modifier: Modifier = Modifier) {
@@ -196,37 +209,40 @@ private fun SidePanel(vm: StudioViewModel, ui: StudioUi, engine: State<EngineSta
                 Panel.SESSION, Panel.PLAY -> SessionGrid(vm, ui, engine, Modifier.fillMaxSize(), onEditTrack = { a.onEditTrack(it.id) })
                 Panel.EDIT -> ClipEditor(vm, ui, engine, Modifier.fillMaxSize())
                 Panel.SOUND -> SoundPanel(vm, ui, a.onSample, Modifier.fillMaxSize())
+                Panel.FX -> EffectsPanel(vm, ui, Modifier.fillMaxSize())
                 Panel.MIX -> MixerPanel(vm, ui, engine, Modifier.fillMaxSize())
             }
         }
     }
 }
 
-/** Move's surface: toolbar, 4×8 pads and the 16 step buttons. */
+/** Move's surface: toolbar, 4×8 pads and the 16 step buttons (drag the divider to resize). */
 @Composable
-private fun MoveSurface(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, modifier: Modifier = Modifier, stepHeight: Int = 52) {
+private fun MoveSurface(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, a: StudioActions, modifier: Modifier = Modifier) {
+    val splits by vm.splits.collectAsState()
     Column(modifier) {
         PadToolbar(vm, ui, Modifier.padding(bottom = 6.dp))
-        PlaySurface(vm, ui, engine, rows = 4, cols = 8, modifier = Modifier.weight(1f).fillMaxWidth())
-        StepStrip(vm, ui, engine, Modifier.fillMaxWidth().height(stepHeight.dp).padding(top = 8.dp))
+        SplitPane(
+            splits["move_steps"] ?: 0.82f, { vm.setSplit("move_steps", it) }, vertical = true,
+            modifier = Modifier.weight(1f).fillMaxWidth(), default = 0.82f, minPane = 40.dp,
+            first = { PlaySurface(vm, ui, engine, rows = 4, cols = 8, modifier = Modifier.fillMaxSize(), onSample = a.onSample) },
+            second = { StepStrip(vm, ui, engine, Modifier.fillMaxSize()) },
+        )
     }
 }
 
 @Composable
 private fun SplitLayout(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, a: StudioActions, layout: DeviceLayout, horizontal: Boolean) {
+    val splits by vm.splits.collectAsState()
     Column(Modifier.fillMaxSize().safeDrawingPadding()) {
         TransportBar(vm, ui, engine, compact = layout.mode == DeviceLayout.Mode.COVER, onBack = vm::closeProject, onSettings = a.onSettings, onExport = a.onExport)
-        if (horizontal) {
-            Row(Modifier.weight(1f).fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                SidePanel(vm, ui, engine, a, Modifier.weight(1f).fillMaxHeight())
-                MoveSurface(vm, ui, engine, Modifier.weight(1f).fillMaxHeight(), stepHeight = if (layout.mode == DeviceLayout.Mode.COVER) 40 else 56)
-            }
-        } else {
-            Column(Modifier.weight(1f).fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                SidePanel(vm, ui, engine, a, Modifier.weight(1f).fillMaxWidth())
-                MoveSurface(vm, ui, engine, Modifier.weight(0.9f).fillMaxWidth())
-            }
-        }
+        val key = if (horizontal) "spread_h" else "spread_v"
+        SplitPane(
+            splits[key] ?: 0.5f, { vm.setSplit(key, it) }, vertical = !horizontal,
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(10.dp), default = 0.5f, minPane = 160.dp,
+            first = { SidePanel(vm, ui, engine, a, Modifier.fillMaxSize()) },
+            second = { MoveSurface(vm, ui, engine, a, Modifier.fillMaxSize()) },
+        )
     }
 }
 
@@ -241,23 +257,23 @@ private fun TabletopLayout(vm: StudioViewModel, ui: StudioUi, engine: State<Engi
                 SidePanel(vm, ui, engine, a, Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp))
             }
             Spacer(Modifier.height(layout.hingeSizeDp + 8.dp))
-            MoveSurface(vm, ui, engine, Modifier.weight(1f).fillMaxWidth().safeDrawingPadding().padding(horizontal = 10.dp, vertical = 6.dp))
+            MoveSurface(vm, ui, engine, a, Modifier.weight(1f).fillMaxWidth().safeDrawingPadding().padding(horizontal = 10.dp, vertical = 6.dp))
         }
     }
 }
 
-/** Half-folded, hinge vertical (book): editor on the left page, pads on the right page. */
+/** Half-folded, hinge vertical (book): editor on the left page, pads on the right; the divider starts at the hinge. */
 @Composable
 private fun BookLayout(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, a: StudioActions, layout: DeviceLayout) {
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val left = layout.hingeDp.coerceIn(200.dp, maxOf(200.dp, maxWidth - 200.dp))
-        Column(Modifier.fillMaxSize().safeDrawingPadding()) {
-            TransportBar(vm, ui, engine, compact = false, onBack = vm::closeProject, onSettings = a.onSettings, onExport = a.onExport)
-            Row(Modifier.weight(1f).fillMaxWidth()) {
-                SidePanel(vm, ui, engine, a, Modifier.width(left - 10.dp).fillMaxHeight().padding(start = 10.dp))
-                Spacer(Modifier.width(layout.hingeSizeDp + 20.dp))
-                MoveSurface(vm, ui, engine, Modifier.weight(1f).fillMaxHeight().padding(end = 10.dp, bottom = 8.dp))
-            }
-        }
+    val splits by vm.splits.collectAsState()
+    val hingeFraction = (layout.hingeDp.value / layout.widthDp.coerceAtLeast(1)).coerceIn(0.2f, 0.8f)
+    Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+        TransportBar(vm, ui, engine, compact = false, onBack = vm::closeProject, onSettings = a.onSettings, onExport = a.onExport)
+        SplitPane(
+            splits["book"] ?: hingeFraction, { vm.setSplit("book", it) }, vertical = false,
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), default = hingeFraction, minPane = 200.dp,
+            first = { SidePanel(vm, ui, engine, a, Modifier.fillMaxSize()) },
+            second = { MoveSurface(vm, ui, engine, a, Modifier.fillMaxSize()) },
+        )
     }
 }
