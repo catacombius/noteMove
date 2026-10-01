@@ -6,3 +6,6 @@
 -keep,includedescriptorclasses class com.notemove.app.**$$serializer { *; }
 -keepclassmembers class com.notemove.app.** { *** Companion; }
 -keepclasseswithmembers class com.notemove.app.** { kotlinx.serialization.KSerializer serializer(...); }
+-keep,includedescriptorclasses class com.notemove.core.**$$serializer { *; }
+-keepclassmembers class com.notemove.core.** { *** Companion; }
+-keepclasseswithmembers class com.notemove.core.** { kotlinx.serialization.KSerializer serializer(...); }
