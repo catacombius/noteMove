@@ -234,7 +234,7 @@ private fun SplitLayout(vm: StudioViewModel, ui: StudioUi, engine: State<EngineS
 @Composable
 private fun TabletopLayout(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, a: StudioActions, layout: DeviceLayout) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val top = layout.hingeDp.coerceIn(120.dp, maxHeight - 160.dp)
+        val top = layout.hingeDp.coerceIn(120.dp, maxOf(120.dp, maxHeight - 160.dp))
         Column(Modifier.fillMaxSize()) {
             Column(Modifier.height(top).fillMaxWidth().safeDrawingPadding()) {
                 TransportBar(vm, ui, engine, compact = false, onBack = vm::closeProject, onSettings = a.onSettings, onExport = a.onExport)
@@ -250,7 +250,7 @@ private fun TabletopLayout(vm: StudioViewModel, ui: StudioUi, engine: State<Engi
 @Composable
 private fun BookLayout(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, a: StudioActions, layout: DeviceLayout) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val left = layout.hingeDp.coerceIn(200.dp, maxWidth - 200.dp)
+        val left = layout.hingeDp.coerceIn(200.dp, maxOf(200.dp, maxWidth - 200.dp))
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
             TransportBar(vm, ui, engine, compact = false, onBack = vm::closeProject, onSettings = a.onSettings, onExport = a.onExport)
             Row(Modifier.weight(1f).fillMaxWidth()) {

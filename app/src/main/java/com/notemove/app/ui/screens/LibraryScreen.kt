@@ -63,7 +63,7 @@ fun LibraryScreen(vm: StudioViewModel, ui: StudioUi, layout: DeviceLayout) {
     var creating by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(ui.message) { ui.message?.let { snackbar.showSnackbar(it); vm.clearMessage() } }
-    val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+    val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) vm.importFile(uri, displayName(context, uri))
     }
     Box(Modifier.fillMaxSize().background(NM.bg)) {
@@ -76,7 +76,7 @@ fun LibraryScreen(vm: StudioViewModel, ui: StudioUi, layout: DeviceLayout) {
             }
             Row(Modifier.padding(vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button({ creating = true }) { Text("+ New set") }
-                OutlinedButton({ import.launch(arrayOf("*/*")) }) { Text("Open .als / set…") }
+                OutlinedButton({ importer.launch(arrayOf("*/*")) }) { Text("Open .als / set…") }
             }
             if (sets.isEmpty()) {
                 Text(

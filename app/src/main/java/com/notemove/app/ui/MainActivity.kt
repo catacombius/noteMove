@@ -46,14 +46,16 @@ class MainActivity : ComponentActivity() {
 
     /** Opening an .als / .notemove / exported zip from a file manager or the share sheet imports it. */
     private fun handleIntent(intent: Intent?) {
-        val uri: Uri = when (intent?.action) {
-            Intent.ACTION_VIEW -> intent.data
-            Intent.ACTION_SEND -> if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-                else @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_STREAM)
+        val i = intent ?: return
+        val uri: Uri = when (i.action) {
+            Intent.ACTION_VIEW -> i.data
+            Intent.ACTION_SEND ->
+                if (Build.VERSION.SDK_INT >= 33) i.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                else @Suppress("DEPRECATION") i.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
             else -> null
         } ?: return
         vm.importFile(uri, displayName(this, uri))
-        intent?.action = null
+        i.action = null
     }
 
     override fun onStart() {
