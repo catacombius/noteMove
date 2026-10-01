@@ -1,6 +1,8 @@
 package com.notemove.core.engine
 
 import com.notemove.core.dsp.DrumMachine
+import com.notemove.core.dsp.EffectChain
+import com.notemove.core.dsp.FxContext
 import com.notemove.core.dsp.Instrument
 import com.notemove.core.dsp.Limiter
 import com.notemove.core.dsp.PolySynth
@@ -13,6 +15,8 @@ import com.notemove.core.dsp.drive
 import com.notemove.core.dsp.normToCutoffHz
 import com.notemove.core.dsp.panLeft
 import com.notemove.core.dsp.panRight
+import com.notemove.core.model.ArpMode
+import com.notemove.core.model.ArpSettings
 import com.notemove.core.model.BEATS_PER_BAR
 import com.notemove.core.model.Clip
 import com.notemove.core.model.DrumKits
@@ -125,6 +129,17 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank()) {
     private val limiter = Limiter(sr)
     private val click = Click(sr)
     private var masterPeak = 0f
+    private val fxCtx = FxContext(sr)
+    private val masterChain = EffectChain(sr)
+    private val arpRandom = java.util.Random(7)
+
+    /** One-shot audition of raw sample data (sample editor), mixed in after the master effects. */
+    private class Preview(val data: FloatArray, val rate: Double, val end: Int, var pos: Double)
+    @Volatile private var preview: Preview? = null
+
+    /** Frame of the sample being previewed, or -1 when nothing plays. */
+    @Volatile var previewFrame: Int = -1
+        private set
 
     // ------------------------------------------------------------------ public API (any thread)
 
@@ -142,6 +157,14 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank()) {
     /** Note repeat for held notes on [trackId]; rate in beats (0.25 = 16ths), 0 disables. */
     fun setNoteRepeat(trackId: String?, rateBeats: Double) = commands.add(Cmd.Repeat(trackId, rateBeats))
     fun panic() = commands.add(Cmd.Panic)
+
+    /** Plays [data] (recorded at [dataRate]) from [start] to [end] frames, for auditioning in the sample editor. */
+    fun previewSample(data: FloatArray, dataRate: Int, start: Int = 0, end: Int = data.size) {
+        if (data.size < 2) return
+        preview = Preview(data, dataRate.toDouble() / sampleRate, end.coerceIn(1, data.size), start.coerceIn(0, data.size - 1).toDouble())
+    }
+
+    fun stopPreview() { preview = null; previewFrame = -1 }
 
     fun drainRecorded(): List<RecordedNote> {
         if (recorded.isEmpty()) return emptyList()
@@ -198,6 +221,9 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank()) {
         processCommands(p, b0)
         if (playing) sequence(p, b0, b1)
         noteRepeat(if (playing) b0 else freeBeat, if (playing) b1 else freeBeat + n * bpf)
+        arpTick(p, b0, b1, freeBeat, freeBeat + n * bpf)
+        fxCtx.tempo = p.tempo
+        fxCtx.beat = if (playing) b0 else freeBeat
 
         val anySolo = p.tracks.any { it.solo }
         for (t in p.tracks) {
@@ -205,6 +231,7 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank()) {
             tl.fill(0f, 0, n); tr.fill(0f, 0, n)
             pl.instrument.render(tl, tr, n)
             pl.processFx(t, tl, tr, n)
+            if (t.effects.isNotEmpty()) pl.chain.process(t.effects, tl, tr, n, fxCtx)
             val audible = !t.mute && (!anySolo || t.solo)
             val gl = t.volume * t.volume * panLeft(t.pan) * 1.41f
             val gr = t.volume * t.volume * panRight(t.pan) * 1.41f
@@ -231,7 +258,9 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank()) {
             val k = ceil(b0)
             if (k < b1) click.trigger(Math.floorMod(k.toLong(), BEATS_PER_BAR.toLong()) == 0L)
         }
+        if (p.masterEffects.isNotEmpty()) masterChain.process(p.masterEffects, ml, mr, n, fxCtx)
         click.render(ml, mr, n, metronomeLevel)
+        renderPreview(n)
 
         val mv = p.masterVolume
         var mp = 0f
@@ -255,14 +284,17 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank()) {
             when (c) {
                 is Cmd.NoteOn -> {
                     val pl = players[c.trackId] ?: continue
+                    val arp = p.track(c.trackId)?.arp
+                    if (arp != null && arp.enabled) { pl.arpPress(c.pitch, c.velocity, if (playing) b0 else freeBeat, arp); continue }
                     pl.instrument.noteOn(c.pitch, c.velocity)
                     pl.liveHeld[c.pitch] = LiveNote(c.velocity, if (playing) b0 - latencyBeats() else null, freeBeat - latencyBeats())
                     if (repeatRate > 0 && repeatTrackId == c.trackId) pl.repeatStart = if (playing) b0 else freeBeat
                 }
                 is Cmd.NoteOff -> {
                     val pl = players[c.trackId] ?: continue
+                    val held = pl.liveHeld.remove(c.pitch)
+                    if (held == null) { pl.arpRelease(c.pitch, p.track(c.trackId)?.arp); continue }
                     pl.instrument.noteOff(c.pitch)
-                    val held = pl.liveHeld.remove(c.pitch) ?: continue
                     finishLiveNote(c.trackId, pl, c.pitch, held, b0)
                 }
                 is Cmd.Play -> if (!playing) startTransport(p, c.launchScene, c.countIn)
@@ -295,7 +327,7 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank()) {
                     repeatTrackId = c.trackId; repeatRate = c.rateBeats
                     players[c.trackId]?.repeatStart = if (playing) b0 else freeBeat
                 }
-                Cmd.Panic -> players.values.forEach { it.instrument.allNotesOff(hard = true); it.pending.clear() }
+                Cmd.Panic -> players.values.forEach { it.instrument.allNotesOff(hard = true); it.pending.clear(); it.arpReset() }
             }
         }
     }
@@ -315,6 +347,7 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank()) {
     }
 
     private fun startTransport(p: Project, launchScene: Int?, countIn: Boolean) {
+        players.values.forEach { it.arpFlush() }
         playing = true
         countingIn = countIn
         songBeat = if (countIn) -BEATS_PER_BAR else 0.0
@@ -334,6 +367,7 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank()) {
         if (recordTrackId != null) stopRecording(songBeat)
         playing = false
         countingIn = false
+        players.values.forEach { it.arpFlush(); it.arpOrigin = freeBeat }
         for (pl in players.values) {
             pl.flushSequencedNotes()
             pl.queuedScene = NONE
@@ -438,6 +472,75 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank()) {
         pl.repeatStart = next
     }
 
+    /** Steps every running arpeggiator. Grid follows the song while playing, else starts at the first press. */
+    private fun arpTick(p: Project, b0: Double, b1: Double, f0: Double, f1: Double) {
+        for (t in p.tracks) {
+            val pl = players[t.id] ?: continue
+            val c0 = if (playing) b0 else f0
+            val c1 = if (playing) b1 else f1
+            if (pl.arpOffs.isNotEmpty()) {
+                val it = pl.arpOffs.iterator()
+                while (it.hasNext()) { val e = it.next(); if (e.offBeat < c1) { pl.instrument.noteOff(e.pitch); it.remove() } }
+            }
+            val a = t.arp
+            if (!a.enabled) { if (pl.arpKeys.isNotEmpty() || pl.arpDown.isNotEmpty()) pl.arpReset(); continue }
+            if (pl.arpKeys.isEmpty()) continue
+            val rate = a.rate.coerceAtLeast(1.0 / 64)
+            val origin = if (playing) 0.0 else pl.arpOrigin
+            val step = origin + ceil((c0 - origin) / rate - 1e-9) * rate
+            if (step >= c1 || step <= pl.arpLastStep + 1e-9) continue
+            pl.arpLastStep = step
+            val notes = arpNotes(pl, a)
+            val len = rate * a.gate.coerceIn(0.05f, 1f)
+            for ((pitch, vel) in notes) {
+                if (pitch !in 0..127) continue
+                pl.instrument.noteOff(pitch)
+                pl.instrument.noteOn(pitch, vel)
+                pl.arpOffs.removeAll { it.pitch == pitch }
+                pl.arpOffs.add(PendingOff(pitch, step + len))
+                if (playing && recordTrackId == t.id && pl.playingScene == recordScene) recordNote(t.id, pl, pitch, step, len, vel)
+                synchronized(playedLock) {
+                    playedRing.addLast(PlayedNote(t.id, pitch, f0 + (step - c0), len, vel, if (playing) step else null))
+                    while (playedRing.size > 2048) playedRing.removeFirst()
+                }
+            }
+        }
+    }
+
+    private fun arpNotes(pl: TrackPlayer, a: ArpSettings): List<Pair<Int, Int>> {
+        val keys = pl.arpKeys.entries.map { it.key to it.value }
+        val octs = a.octaves.coerceIn(1, 4)
+        val idx = pl.arpIndex++
+        if (a.mode == ArpMode.CHORD) {
+            val o = (idx % octs) * 12
+            return keys.map { (k, v) -> k + o to v }
+        }
+        val base = when (a.mode) {
+            ArpMode.AS_PLAYED -> keys
+            ArpMode.DOWN -> keys.sortedByDescending { it.first }
+            else -> keys.sortedBy { it.first }
+        }
+        val expanded = if (a.mode == ArpMode.DOWN) (octs - 1 downTo 0).flatMap { o -> base.map { (k, v) -> k + o * 12 to v } }
+        else (0 until octs).flatMap { o -> base.map { (k, v) -> k + o * 12 to v } }
+        val seq = if (a.mode == ArpMode.UP_DOWN && expanded.size > 2) expanded + expanded.reversed().drop(1).dropLast(1) else expanded
+        if (seq.isEmpty()) return emptyList()
+        return listOf(if (a.mode == ArpMode.RANDOM) seq[arpRandom.nextInt(seq.size)] else seq[idx % seq.size])
+    }
+
+    private fun renderPreview(n: Int) {
+        val pv = preview ?: return
+        val d = pv.data
+        for (i in 0 until n) {
+            val idx = pv.pos.toInt()
+            if (idx >= pv.end - 1) { preview = null; previewFrame = -1; return }
+            val f = (pv.pos - idx).toFloat()
+            val s = (d[idx] + (d[idx + 1] - d[idx]) * f) * 0.8f
+            ml[i] += s; mr[i] += s
+            pv.pos += pv.rate
+        }
+        previewFrame = pv.pos.toInt()
+    }
+
     private fun publish() {
         val now = System.nanoTime()
         if (now - lastPublish < 15_000_000L) return
@@ -479,6 +582,35 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank()) {
         var repeatStart = 0.0
         val pending = ArrayList<PendingOff>()
         val liveHeld = LinkedHashMap<Int, LiveNote>()
+        val chain = EffectChain(sr)
+        // Arpeggiator state (audio thread)
+        val arpKeys = LinkedHashMap<Int, Int>()
+        val arpDown = HashSet<Int>()
+        val arpOffs = ArrayList<PendingOff>()
+        var arpOrigin = 0.0
+        var arpIndex = 0
+        var arpLastStep = -1e9
+
+        fun arpPress(pitch: Int, velocity: Int, now: Double, a: ArpSettings) {
+            // With latch, a fresh press after letting go of everything starts a new pattern.
+            if (a.latch && arpDown.isEmpty()) arpKeys.clear()
+            if (arpKeys.isEmpty()) { arpOrigin = now; arpIndex = 0; arpLastStep = -1e9 }
+            arpKeys[pitch] = velocity
+            arpDown.add(pitch)
+        }
+
+        fun arpRelease(pitch: Int, a: ArpSettings?) {
+            arpDown.remove(pitch)
+            if (a == null || !a.latch || !a.enabled) arpKeys.remove(pitch)
+        }
+
+        fun arpFlush() {
+            for (e in arpOffs) instrument.noteOff(e.pitch)
+            arpOffs.clear()
+            arpLastStep = -1e9
+        }
+
+        fun arpReset() { arpFlush(); arpKeys.clear(); arpDown.clear(); arpIndex = 0 }
         private val fl = Svf()
         private val fr = Svf()
 

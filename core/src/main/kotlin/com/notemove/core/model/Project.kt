@@ -55,6 +55,9 @@ data class Track(
     val mute: Boolean = false,
     val solo: Boolean = false,
     val fx: TrackFx = TrackFx(),
+    /** Insert effects, processed in order after the instrument. */
+    val effects: List<EffectSlot> = emptyList(),
+    val arp: ArpSettings = ArpSettings(),
     /** Session clips keyed by scene index. */
     val clips: Map<Int, Clip> = emptyMap(),
 ) {
@@ -105,6 +108,8 @@ data class Project(
     val samples: List<SampleRef> = emptyList(),
     val masterVolume: Float = 0.85f,
     val globalFx: GlobalFx = GlobalFx(),
+    /** Effects on the master bus, before the limiter. */
+    val masterEffects: List<EffectSlot> = emptyList(),
     val launchQuantization: LaunchQuantization = LaunchQuantization.BAR,
     val createdAt: Long = System.currentTimeMillis(),
     val modifiedAt: Long = System.currentTimeMillis(),
