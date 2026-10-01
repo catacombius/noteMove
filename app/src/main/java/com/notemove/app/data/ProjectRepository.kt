@@ -1,0 +1,70 @@
+package com.notemove.app.data
+
+import android.content.Context
+import com.notemove.core.dsp.SampleBank
+import com.notemove.core.dsp.SampleData
+import com.notemove.core.export.ProjectJson
+import com.notemove.core.export.Wav
+import com.notemove.core.model.Project
+import com.notemove.core.model.SampleRef
+import com.notemove.core.model.newId
+import java.io.File
+
+data class ProjectSummary(val id: String, val name: String, val modifiedAt: Long, val tempo: Double, val tracks: Int, val clips: Int)
+
+/** Stores each project as `files/projects/<id>/project.json` plus its samples as WAV files. */
+class ProjectRepository(context: Context) {
+    private val root = File(context.filesDir, "projects").apply { mkdirs() }
+
+    fun dir(id: String) = File(root, id)
+    fun samplesDir(id: String) = File(dir(id), "samples").apply { mkdirs() }
+
+    fun list(): List<ProjectSummary> = root.listFiles().orEmpty().mapNotNull { d ->
+        val f = File(d, "project.json")
+        if (!f.exists()) return@mapNotNull null
+        runCatching {
+            val p = ProjectJson.decode(f.readText())
+            ProjectSummary(p.id, p.name, p.modifiedAt, p.tempo, p.tracks.size, p.tracks.sumOf { it.clips.size })
+        }.getOrNull()
+    }.sortedByDescending { it.modifiedAt }
+
+    fun load(id: String): Project? = runCatching { ProjectJson.decode(File(dir(id), "project.json").readText()) }.getOrNull()
+
+    @Synchronized
+    fun save(project: Project) {
+        val d = dir(project.id).apply { mkdirs() }
+        val tmp = File(d, "project.json.tmp")
+        tmp.writeText(ProjectJson.encode(project))
+        tmp.renameTo(File(d, "project.json"))
+    }
+
+    fun delete(id: String) { dir(id).deleteRecursively() }
+
+    fun duplicate(id: String, newName: String): Project? {
+        val p = load(id) ?: return null
+        val copy = p.copy(id = newId(), name = newName, createdAt = System.currentTimeMillis(), modifiedAt = System.currentTimeMillis())
+        dir(id).resolve("samples").copyRecursively(samplesDir(copy.id), overwrite = true)
+        save(copy)
+        return copy
+    }
+
+    fun sampleFile(projectId: String, fileName: String) = File(samplesDir(projectId), fileName)
+
+    /** Writes mono audio as a new sample of [projectId] and returns its reference. */
+    fun addSample(projectId: String, name: String, data: FloatArray, sampleRate: Int): SampleRef {
+        val id = newId()
+        val fileName = "$id.wav"
+        sampleFile(projectId, fileName).outputStream().use { Wav.write(it, sampleRate, data, null, 24) }
+        return SampleRef(id = id, name = name, fileName = fileName, sampleRate = sampleRate, frames = data.size)
+    }
+
+    /** Loads every sample of [project] into [bank] (replacing what was there). */
+    fun loadSamples(project: Project, bank: SampleBank) {
+        bank.clear()
+        for (ref in project.samples) {
+            val f = sampleFile(project.id, ref.fileName)
+            if (!f.exists()) continue
+            runCatching { f.inputStream().use { Wav.readMono(it) } }.getOrNull()?.let { bank.put(ref.id, SampleData(it.mono, it.sampleRate)) }
+        }
+    }
+}

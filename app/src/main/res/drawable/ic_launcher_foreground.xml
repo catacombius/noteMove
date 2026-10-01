@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A 4x4 pad grid with a few lit pads. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:translateX="30" android:translateY="30">
+        <path android:fillColor="#FFFF764D" android:pathData="M0,0h10v10h-10z"/>
+        <path android:fillColor="#FF3A3A3A" android:pathData="M12.67,0h10v10h-10z"/>
+        <path android:fillColor="#FF3A3A3A" android:pathData="M25.33,0h10v10h-10z"/>
+        <path android:fillColor="#FFF7F47C" android:pathData="M38,0h10v10h-10z"/>
+        <path android:fillColor="#FF3A3A3A" android:pathData="M0,12.67h10v10h-10z"/>
+        <path android:fillColor="#FF5CFFE8" android:pathData="M12.67,12.67h10v10h-10z"/>
+        <path android:fillColor="#FF3A3A3A" android:pathData="M25.33,12.67h10v10h-10z"/>
+        <path android:fillColor="#FF3A3A3A" android:pathData="M38,12.67h10v10h-10z"/>
+        <path android:fillColor="#FF3A3A3A" android:pathData="M0,25.33h10v10h-10z"/>
+        <path android:fillColor="#FF3A3A3A" android:pathData="M12.67,25.33h10v10h-10z"/>
+        <path android:fillColor="#FFD86CE4" android:pathData="M25.33,25.33h10v10h-10z"/>
+        <path android:fillColor="#FF3A3A3A" android:pathData="M38,25.33h10v10h-10z"/>
+        <path android:fillColor="#FFFF764D" android:pathData="M0,38h10v10h-10z"/>
+        <path android:fillColor="#FF3A3A3A" android:pathData="M12.67,38h10v10h-10z"/>
+        <path android:fillColor="#FF3A3A3A" android:pathData="M25.33,38h10v10h-10z"/>
+        <path android:fillColor="#FF8BC5FF" android:pathData="M38,38h10v10h-10z"/>
+    </group>
+</vector>
