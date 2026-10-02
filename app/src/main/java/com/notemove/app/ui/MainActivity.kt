@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -23,6 +24,10 @@ import com.notemove.app.ui.theme.NoteMoveTheme
 
 class MainActivity : ComponentActivity() {
     private val vm: StudioViewModel by viewModels()
+    private val keys by lazy { KeyboardShortcuts(vm) { onBackPressedDispatcher.onBackPressed() } }
+
+    /** Hardware keyboard: computer MIDI keyboard and shortcuts get first look at every key. */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean = keys.handle(event) || super.dispatchKeyEvent(event)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -54,7 +59,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) applyFullscreen()
+        if (hasFocus) applyFullscreen() else keys.releaseAll()
     }
 
     override fun onNewIntent(intent: Intent) {

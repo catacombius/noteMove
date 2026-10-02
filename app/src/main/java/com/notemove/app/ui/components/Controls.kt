@@ -33,6 +33,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -66,6 +67,9 @@ fun Knob(
         Canvas(
             Modifier
                 .size(size)
+                // Mouse: wheel turns the knob (Shift = fine), right-click opens the menu.
+                .onWheel { d, mods -> change((current - (d.y + d.x) * if (mods.isShiftPressed) 0.005f else 0.03f).coerceIn(0f, 1f)) }
+                .onSecondaryClick { menu = true }
                 .pointerInput(Unit) {
                     detectVerticalDragGestures { c, dy ->
                         c.consume()
@@ -124,6 +128,7 @@ fun Fader(value: Float, onChange: (Float) -> Unit, level: Float, color: Color, m
     Canvas(
         modifier
             .width(44.dp)
+            .onWheel { d, mods -> change((current - d.y * if (mods.isShiftPressed) 0.005f else 0.03f).coerceIn(0f, 1f)) }
             .pointerInput(Unit) {
                 detectVerticalDragGestures { c, dy -> c.consume(); change((current - dy / size.height).coerceIn(0f, 1f)) }
             }

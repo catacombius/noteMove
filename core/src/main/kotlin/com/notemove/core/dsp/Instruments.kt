@@ -224,6 +224,9 @@ private class DrumVoice(private val sr: Float, padIndex: Int) {
     private var pos = 0.0
     private var rate = 1.0
     private var held = false
+    private var regionStart = 0
+    private var regionEnd = 0
+    private var fadeLen = 1
 
     fun trigger(p: DrumPad, velocity: Int, sampleData: SampleData?) {
         pad = p
@@ -259,10 +262,24 @@ private class DrumVoice(private val sr: Float, padIndex: Int) {
             DrumSound.CONGA -> { amp.trigger(1f, 0.22f * d, sr); pitchEnv.trigger(1f, 0.02f, sr) }
             DrumSound.CLAVE -> { amp.trigger(1f, 0.06f * d, sr) }
             DrumSound.ZAP -> { amp.trigger(1f, 0.25f * d, sr); pitchEnv.trigger(1f, 0.05f * d, sr) }
+            DrumSound.SNAP -> { amp.trigger(1f, 0.12f * d, sr) }
+            DrumSound.TAMBOURINE -> { amp.trigger(1f, 0.28f * d, sr) }
+            DrumSound.WOODBLOCK -> { amp.trigger(1f, 0.07f * d, sr) }
+            DrumSound.BONGO -> { amp.trigger(1f, 0.16f * d, sr); pitchEnv.trigger(1f, 0.015f, sr) }
+            DrumSound.AGOGO -> { amp.trigger(1f, 0.35f * d, sr) }
+            DrumSound.BELL -> { amp.trigger(1f, 0.9f * d, sr) }
+            DrumSound.NOISE -> { amp.trigger(1f, 0.3f * d, sr) }
+            DrumSound.BOOM_808 -> { amp.trigger(1f, 1.1f * d, sr); pitchEnv.trigger(1f, 0.05f, sr) }
             DrumSound.SAMPLE -> {
+                val smp = sample!!
                 amp.trigger(1f, 30f * d, sr)
-                pos = 0.0
-                rate = (sample!!.sampleRate / sr.toDouble()) * tuneRatio
+                val a = (minOf(p.start, p.end).coerceIn(0f, 1f) * (smp.frames - 1)).toInt()
+                val b = (maxOf(p.start, p.end).coerceIn(0f, 1f) * (smp.frames - 1)).toInt()
+                regionStart = a
+                regionEnd = if (b - a < 2) smp.frames - 1 else b
+                fadeLen = max(1, (smp.sampleRate * 0.003f).toInt()) // 3 ms fades so slice edges don't click
+                pos = a.toDouble()
+                rate = (smp.sampleRate / sr.toDouble()) * tuneRatio
             }
         }
         active = true
@@ -348,14 +365,73 @@ private class DrumVoice(private val sr: Float, padIndex: Int) {
                     phase += f / sr; if (phase >= 1f) phase -= 1f
                     fastSin(phase) * amp.next() * 0.8f
                 }
+                DrumSound.SNAP -> {
+                    // A few very short noise bursts through a bright band-pass.
+                    val ms = t * 1000f / sr
+                    val burst = if (ms < 12f) 1f - (ms % 4f) / 4f else 0f
+                    f1.set(2200f * tuneRatio + 1200f * tone, 0.6f, sr)
+                    f1.process(noise.next())
+                    f1.bp * (if (ms < 12f) burst else 1f) * amp.next() * 1.8f
+                }
+                DrumSound.TAMBOURINE -> {
+                    val shake = 0.6f + 0.4f * fastSin((t * 26f / sr) % 1f)
+                    val m = metallic(tuneRatio * 2.6f)
+                    f1.set(7500f + 2500f * tone, 0.3f, sr)
+                    f1.process(noise.next() * 0.6f + m * 0.5f)
+                    f1.hp * amp.next() * shake * 0.9f
+                }
+                DrumSound.WOODBLOCK -> {
+                    phase += 950f * tuneRatio / sr; if (phase >= 1f) phase -= 1f
+                    f1.set(950f * tuneRatio, 0.8f, sr)
+                    f1.process(fastSin(phase) + if (t < sr * 0.002f) noise.next() * tone else 0f)
+                    f1.bp * amp.next() * 1.6f
+                }
+                DrumSound.BONGO -> {
+                    val f = 380f * tuneRatio * (1f + 0.25f * pitchEnv.next())
+                    phase += f / sr; if (phase >= 1f) phase -= 1f
+                    val slap = if (t < sr * 0.004f) noise.next() * 0.3f * tone else 0f
+                    (fastSin(phase) + slap) * amp.next()
+                }
+                DrumSound.AGOGO -> {
+                    phase += 820f * tuneRatio / sr; if (phase >= 1f) phase -= 1f
+                    metal[0] += 820f * 2.76f * tuneRatio / sr; if (metal[0] >= 1f) metal[0] -= 1f
+                    (fastSin(phase) * 0.7f + fastSin(metal[0]) * 0.35f * tone) * amp.next() * 0.8f
+                }
+                DrumSound.BELL -> {
+                    // Inharmonic partials of a struck bell.
+                    val base = 660f * tuneRatio
+                    phase += base / sr; if (phase >= 1f) phase -= 1f
+                    metal[0] += base * 2.0f / sr; if (metal[0] >= 1f) metal[0] -= 1f
+                    metal[1] += base * 2.76f / sr; if (metal[1] >= 1f) metal[1] -= 1f
+                    metal[2] += base * 5.4f / sr; if (metal[2] >= 1f) metal[2] -= 1f
+                    val e = amp.next()
+                    (fastSin(phase) * 0.6f + fastSin(metal[0]) * 0.3f + fastSin(metal[1]) * 0.25f * e + fastSin(metal[2]) * 0.15f * tone * e * e) * e * 0.7f
+                }
+                DrumSound.NOISE -> {
+                    f1.set(300f * tuneRatio + 9000f * tone, 0.2f, sr)
+                    f1.process(noise.next())
+                    (f1.lp * (1f - tone) + f1.hp * tone) * amp.next() * 0.8f
+                }
+                DrumSound.BOOM_808 -> {
+                    val f = 49f * tuneRatio * (1f + 0.6f * pitchEnv.next())
+                    phase += f / sr; if (phase >= 1f) phase -= 1f
+                    val click = if (t < sr * 0.003f) noise.next() * 0.3f * tone else 0f
+                    softClip(fastSin(phase) * (1.2f + tone * 1.5f) + click) * amp.next()
+                }
                 DrumSound.SAMPLE -> {
                     val smp = sample
-                    if (smp == null || pos >= smp.frames - 1) { amp.trigger(0f, 0.001f, sr); 0f } else {
-                        val idx = pos.toInt()
+                    if (smp == null || pos >= regionEnd) { amp.trigger(0f, 0.001f, sr); 0f } else {
+                        val idx = pos.toInt().coerceAtMost(smp.frames - 2)
                         val frac = (pos - idx).toFloat()
                         val d = smp.data
                         pos += rate
-                        (d[idx] + (d[idx + 1] - d[idx]) * frac) * amp.next()
+                        // Short fades at the region edges (skipped when playing from the very start of the sample).
+                        val fromStart = idx - regionStart
+                        val toEnd = regionEnd - idx
+                        var edge = 1f
+                        if (regionStart > 0 && fromStart < fadeLen) edge = fromStart.toFloat() / fadeLen
+                        if (toEnd < fadeLen && regionEnd < smp.frames - 1) edge = minOf(edge, toEnd.toFloat() / fadeLen)
+                        (d[idx] + (d[idx + 1] - d[idx]) * frac) * amp.next() * edge
                     }
                 }
             }

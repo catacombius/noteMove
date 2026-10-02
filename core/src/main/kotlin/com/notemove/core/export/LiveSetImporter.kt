@@ -83,7 +83,7 @@ object LiveSetImporter {
             } else r.session.filterKeys { it in 0 until Project.MAX_SCENES }
             val colorIdx = TrackColors.ALL.indices.minByOrNull { abs(TrackColors.ALL[it].liveIndex - r.color) } ?: i
             if (r.drums) Track(name = r.name, kind = TrackKind.DRUMS, color = colorIdx, drumKit = DrumKits.KIT_808, clips = clips)
-            else Track(name = r.name, kind = TrackKind.SYNTH, color = colorIdx, synth = SynthPresets.ALL[i % SynthPresets.ALL.size], clips = clips)
+            else Track(name = r.name, kind = TrackKind.SYNTH, color = colorIdx, synth = IMPORT_SYNTHS[i % IMPORT_SYNTHS.size], clips = clips)
         }
         val sceneCount = (result.flatMap { it.clips.keys }.maxOrNull() ?: 0) + 1
         return Project(
@@ -136,3 +136,5 @@ object LiveSetImporter {
 
     private fun Element.value(): String? = if (hasAttribute("Value")) getAttribute("Value") else null
 }
+
+private val IMPORT_SYNTHS = with(SynthPresets) { listOf(BASS, KEYS, LEAD, PAD, PLUCK, BELL, ACID, STRINGS) }

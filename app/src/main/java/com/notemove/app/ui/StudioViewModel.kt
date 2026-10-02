@@ -61,6 +61,12 @@ enum class RowLayout(val label: String, val inKeySteps: Int, val semitones: Int)
     FOURTHS("4ths", 3, 5), THIRDS("3rds", 2, 4), SEQUENTIAL("Sequential", -1, -1)
 }
 
+/** Sheets the keyboard can open (Ctrl+E, Ctrl+,). */
+enum class Overlay { SETTINGS, EXPORT }
+
+/** Live-style computer MIDI keyboard: [octave] is where the A key sits on melodic tracks (C3 = middle C), [drumOctave] on drums. */
+data class ComputerKeys(val enabled: Boolean = true, val octave: Int = 3, val drumOctave: Int = 1, val velocity: Int = 100)
+
 /** A clip slot, used for multi-selection in the session grid. */
 data class SlotRef(val trackId: String, val scene: Int)
 
@@ -97,6 +103,8 @@ data class StudioUi(
     val librarySelection: Set<String> = emptySet(),
     /** Sample open in the spectral editor. */
     val editingSampleId: String? = null,
+    /** Sample open in the slicer. */
+    val slicingSampleId: String? = null,
     val fxTarget: FxTarget = FxTarget(null),
     val padMode: PadMode = PadMode.PLAY,
     val rowLayout: RowLayout = RowLayout.FOURTHS,
@@ -908,6 +916,37 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     /** Saves edited audio as a new sample and assigns it to the current pad / sampler. */
     fun saveSampleAsNew(name: String, data: FloatArray) = assignSample(name, data)
 
+    // ------------------------------------------------------------------ slicing
+
+    fun openSlicer(sampleId: String? = currentSampleId()) {
+        if (sampleId == null || engine.samples[sampleId] == null) return toast("Load or record a sample first")
+        engine.stopPreview()
+        _ui.update { it.copy(slicingSampleId = sampleId, editingSampleId = null) }
+    }
+
+    fun closeSlicer() { engine.stopPreview(); _ui.update { it.copy(slicingSampleId = null) } }
+
+    /**
+     * Makes a new drum track with slice `i` of [sampleId] on pad `i` (Move / Live's "Slice to Drum Rack"),
+     * optionally with a clip in the selected scene that replays the slices in their original rhythm.
+     */
+    fun sliceToDrumRack(sampleId: String, points: IntArray, loopBeats: Double, makeClip: Boolean, choke: Boolean) {
+        val p = _ui.value.project ?: return
+        val ref = p.sample(sampleId) ?: return
+        val data = engine.samples[sampleId] ?: return
+        if (p.tracks.size >= Project.MAX_TRACKS) return toast("Track limit reached — delete a track first")
+        val name = ref.name.take(14)
+        val kit = com.notemove.core.dsp.Slicer.toDrumKit("$name Slices", sampleId, points, data.frames, DrumKits.KIT_808, choke)
+        val scene = _ui.value.selectedScene
+        val color = (p.tracks.maxOfOrNull { it.color } ?: 0) + 3
+        var track = Track(name = "$name Slices", kind = TrackKind.DRUMS, color = color, drumKit = kit)
+        if (makeClip) track = track.withClip(scene, com.notemove.core.dsp.Slicer.toClip(points, data.frames, loopBeats, name))
+        edit { it.copy(tracks = it.tracks + track) }
+        closeSlicer()
+        _ui.update { it.copy(selectedTrackId = track.id, selectedPad = 0, noteSelection = emptySet()) }
+        toast("Sliced into ${points.size} pads${if (makeClip) " · clip in ${p.sceneName(scene)}" else ""}")
+    }
+
     /** Sets the sampler's start/end (fractions) from a selection in the editor. */
     fun setSamplerRegion(start: Float, end: Float) {
         val t = _ui.value.track ?: return
@@ -1031,6 +1070,35 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private val _downloads = MutableStateFlow<Map<String, Float>>(emptyMap())
+    /** Free sound libraries being downloaded: pack id -> progress 0..1. */
+    val downloads: StateFlow<Map<String, Float>> = _downloads.asStateFlow()
+
+    /** Downloads a free SoundFont into the library and (optionally) puts it on the selected track. */
+    fun downloadSoundPack(pack: com.notemove.app.data.SoundPack, useNow: Boolean = true) {
+        if (pack.id in _downloads.value) return
+        _downloads.update { it + (pack.id to 0f) }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val tmp = File(getApplication<Application>().cacheDir, "${pack.id}.download")
+                    try {
+                        com.notemove.app.data.SoundLibrary.download(pack, tmp) { f -> _downloads.update { m -> if (pack.id in m) m + (pack.id to f) else m } }
+                        val ref = tmp.inputStream().use { repo.addSoundFont(pack.name, it) }
+                        if (!engine.soundFonts.contains(ref.id)) engine.soundFonts.put(ref.id, SoundFont.parse(repo.soundFontFile(ref).readBytes(), pack.name))
+                        ref
+                    } finally {
+                        tmp.delete()
+                    }
+                }
+            }
+            _downloads.update { it - pack.id }
+            fontsVersion.value++
+            result.onSuccess { ref -> refreshFontLibrary(); if (useNow) useSoundFont(ref); toast("${pack.name} is ready — pick a preset") }
+                .onFailure { toast(if (it is OutOfMemoryError) "Not enough memory for ${pack.name}" else "Download failed: ${it.message ?: "no connection"}") }
+        }
+    }
+
     fun setSoundFontPreset(preset: SoundFont.Preset) {
         val t = _ui.value.track ?: return
         engine.panic()
@@ -1063,6 +1131,38 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     fun setHideNavBar(on: Boolean) {
         _hideNavBar.value = on
         settings.edit().putBoolean("hide_nav", on).apply()
+    }
+
+    // ------------------------------------------------------------------ keyboard & overlays
+
+    private val _computerKeys = MutableStateFlow(ComputerKeys(enabled = settings.getBoolean("computer_keyboard", true)))
+    val computerKeys: StateFlow<ComputerKeys> = _computerKeys.asStateFlow()
+    val overlayRequest = MutableStateFlow<Overlay?>(null)
+
+    fun requestOverlay(o: Overlay) { overlayRequest.value = o }
+
+    fun toggleComputerKeyboard() {
+        val on = !_computerKeys.value.enabled
+        _computerKeys.update { it.copy(enabled = on) }
+        settings.edit().putBoolean("computer_keyboard", on).apply()
+        toast(if (on) "Computer MIDI keyboard on (A–' play notes, Z/X octave, C/V velocity)" else "Computer MIDI keyboard off")
+    }
+
+    private val keysOnDrums get() = _ui.value.track?.drumLayout == true
+
+    /** MIDI note the A key plays right now. */
+    fun keyboardBaseNote(): Int = _computerKeys.value.let { (if (keysOnDrums) it.drumOctave else it.octave) + 2 } * 12
+
+    fun shiftKeyboardOctave(delta: Int) {
+        _computerKeys.update { k ->
+            if (keysOnDrums) k.copy(drumOctave = (k.drumOctave + delta).coerceIn(-2, 8)) else k.copy(octave = (k.octave + delta).coerceIn(-2, 8))
+        }
+        toast("Keyboard: ${com.notemove.core.model.Scale.noteName(keyboardBaseNote())} – ${com.notemove.core.model.Scale.noteName((keyboardBaseNote() + 17).coerceAtMost(127))}")
+    }
+
+    fun stepKeyboardVelocity(up: Boolean) {
+        _computerKeys.update { it.copy(velocity = com.notemove.app.input.ComputerKeyboard.nextVelocity(it.velocity, up)) }
+        toast("Keyboard velocity ${_computerKeys.value.velocity}")
     }
 
     init {

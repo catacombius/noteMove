@@ -46,6 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.notemove.app.ui.DeviceLayout
+import com.notemove.app.ui.Overlay
 import com.notemove.app.ui.Panel
 import com.notemove.app.ui.StudioUi
 import com.notemove.app.ui.StudioViewModel
@@ -59,6 +60,7 @@ import com.notemove.app.ui.components.MixerPanel
 import com.notemove.app.ui.components.PushSurface
 import com.notemove.app.ui.components.PlaySurface
 import com.notemove.app.ui.components.SampleSheet
+import com.notemove.app.ui.components.SliceEditor
 import com.notemove.app.ui.components.SessionGrid
 import com.notemove.app.ui.components.SettingsSheet
 import com.notemove.app.ui.components.SoundPanel
@@ -80,10 +82,21 @@ fun StudioScreen(vm: StudioViewModel, ui: StudioUi, layout: DeviceLayout) {
     LaunchedEffect(ui.message) {
         ui.message?.let { snackbar.showSnackbar(it); vm.clearMessage() }
     }
+    // Sheets requested from the keyboard (Ctrl+E, Ctrl+,).
+    val overlay by vm.overlayRequest.collectAsState()
+    LaunchedEffect(overlay) {
+        when (overlay) {
+            Overlay.SETTINGS -> settings = true
+            Overlay.EXPORT -> export = true
+            null -> Unit
+        }
+        vm.overlayRequest.value = null
+    }
     // Back closes whatever is on top first (sheets, editors, selections), and only then leaves the set.
     BackHandler {
         when {
             ui.editingSampleId != null -> vm.closeSampleEditor()
+            ui.slicingSampleId != null -> vm.closeSlicer()
             settings -> settings = false
             export -> { vm.resetExport(); export = false }
             sample -> sample = false
@@ -115,6 +128,7 @@ fun StudioScreen(vm: StudioViewModel, ui: StudioUi, layout: DeviceLayout) {
     if (export) ExportSheet(vm, ui) { export = false }
     if (sample) SampleSheet(vm, ui) { sample = false }
     ui.editingSampleId?.let { SampleEditor(vm, ui, it) }
+    ui.slicingSampleId?.let { SliceEditor(vm, ui, it) }
     editTrackId?.let { id -> ui.project?.track(id)?.let { TrackDialog(vm, it) { editTrackId = null } } ?: run { editTrackId = null } }
 }
 

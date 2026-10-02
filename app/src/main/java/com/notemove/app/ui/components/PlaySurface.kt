@@ -247,7 +247,7 @@ fun ArpButton(vm: StudioViewModel, track: Track) {
                 Modifier.clip(RoundedCornerShape(6.dp))
                     .border(1.dp, if (a.enabled) color else NM.line, RoundedCornerShape(6.dp))
                     .background(if (a.enabled) color.copy(alpha = 0.25f) else Color.Transparent)
-                    .combinedClickable(onClick = { vm.setArp { it.copy(enabled = !it.enabled) } }, onLongClick = { menu = true })
+                    .holdClickable(onClick = { vm.setArp { it.copy(enabled = !it.enabled) } }, onLongClick = { menu = true })
                     .padding(horizontal = 8.dp, vertical = 4.dp),
             ) {
                 Text(if (a.enabled) "Arp ${a.mode.label} ${rateLabel(a.rate)}" else "Arp", fontSize = 12.sp,

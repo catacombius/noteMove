@@ -108,14 +108,14 @@ fun SessionGrid(
                 Box(
                     Modifier.width(colWidth).height(30.dp).clip(RoundedCornerShape(6.dp))
                         .background(if (active) NM.surfaceHigh else NM.padDim)
-                        .combinedClickable(onClick = { vm.stopTrack(t.id) }),
+                        .holdClickable(onClick = { vm.stopTrack(t.id) }),
                     contentAlignment = Alignment.Center,
                 ) { Icon(Icons.Filled.Stop, "Stop ${t.name}", tint = if (active) NM.text else NM.textDim, modifier = Modifier.size(18.dp)) }
             }
             Box(Modifier.width(colWidth))
             Box(
                 Modifier.width(64.dp).height(30.dp).clip(RoundedCornerShape(6.dp)).background(NM.surfaceHigh)
-                    .combinedClickable(onClick = vm::stopAll),
+                    .holdClickable(onClick = vm::stopAll),
                 contentAlignment = Alignment.Center,
             ) { Text("Stop all", fontSize = 11.sp, color = NM.text) }
         }
@@ -132,7 +132,7 @@ private fun TrackHeader(vm: StudioViewModel, t: Track, selected: Boolean, width:
             Modifier.width(width).clip(RoundedCornerShape(6.dp))
                 .background(if (selected) color.copy(alpha = 0.3f) else NM.surfaceHigh)
                 .border(if (selected) 2.dp else 0.dp, if (selected) color else Color.Transparent, RoundedCornerShape(6.dp))
-                .combinedClickable(onClick = { vm.selectTrack(t.id) }, onLongClick = { menu = true })
+                .holdClickable(onClick = { vm.selectTrack(t.id) }, onLongClick = { menu = true })
                 .padding(6.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -207,7 +207,7 @@ private fun ClipSlot(
                     },
                     RoundedCornerShape(6.dp),
                 )
-                .combinedClickable(
+                .holdClickable(
                     onClick = {
                         when {
                             multi && clip != null -> vm.toggleClipSelection(ref)
@@ -263,7 +263,7 @@ private fun SceneButton(vm: StudioViewModel, project: Project, scene: Int, selec
         Row(
             Modifier.width(120.dp).height(height).clip(RoundedCornerShape(6.dp))
                 .background(if (selected) NM.surfaceHigh else NM.surface)
-                .combinedClickable(onClick = { vm.launchScene(scene) }, onLongClick = { menu = true })
+                .holdClickable(onClick = { vm.launchScene(scene) }, onLongClick = { menu = true })
                 .padding(horizontal = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

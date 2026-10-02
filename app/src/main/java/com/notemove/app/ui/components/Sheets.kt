@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -126,6 +127,7 @@ fun SettingsSheet(vm: StudioViewModel, ui: StudioUi, onDismiss: () -> Unit) {
                 Text("Also hide the navigation bar (swipe from the edge to show it)", fontSize = 13.sp, color = NM.text)
             }
             AudioSection(vm)
+            KeyboardMouseSection(vm)
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -334,6 +336,23 @@ private fun BleMidiSection(vm: StudioViewModel) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
             Text((if (d.connected) "● " else "○ ") + d.name, fontSize = 13.sp, color = if (d.connected) NM.play else NM.text, modifier = Modifier.weight(1f))
             TextButton({ if (d.connected) ble.disconnect(d.address) else ble.connect(d.address) }) { Text(if (d.connected) "Disconnect" else "Connect") }
+        }
+    }
+}
+
+/** Hardware keyboard and mouse: computer MIDI keyboard switch and the shortcut list. */
+@Composable
+private fun KeyboardMouseSection(vm: StudioViewModel) {
+    val keys by vm.computerKeys.collectAsState()
+    SectionTitle("Keyboard & mouse")
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(keys.enabled, { vm.toggleComputerKeyboard() })
+        Text("Computer MIDI keyboard — play the selected track from a Bluetooth / USB keyboard or keyboard cover", fontSize = 13.sp, color = NM.text)
+    }
+    for ((k, what) in com.notemove.app.ui.KeyboardShortcuts.HELP + com.notemove.app.ui.KeyboardShortcuts.MOUSE_HELP) {
+        Row(Modifier.padding(vertical = 2.dp)) {
+            Text(k, fontSize = 12.sp, color = NM.accent, fontWeight = FontWeight.Medium, modifier = Modifier.width(150.dp))
+            Text(what, fontSize = 12.sp, color = NM.textDim)
         }
     }
 }

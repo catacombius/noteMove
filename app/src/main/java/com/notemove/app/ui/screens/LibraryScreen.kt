@@ -145,7 +145,7 @@ private fun SetCard(vm: StudioViewModel, s: ProjectSummary, selected: Boolean, s
         Column(
             Modifier.fillMaxWidth().height(110.dp).clip(RoundedCornerShape(12.dp)).background(if (selected) NM.surfaceHigh else NM.surface)
                 .border(2.dp, if (selected) NM.solo else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(12.dp))
-                .combinedClickable(onClick = { if (selecting) vm.toggleLibrarySelection(s.id) else vm.openProject(s.id) }, onLongClick = { menu = true })
+                .holdClickable(onClick = { if (selecting) vm.toggleLibrarySelection(s.id) else vm.openProject(s.id) }, onLongClick = { menu = true })
                 .padding(14.dp),
         ) {
             Text(s.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = NM.text, maxLines = 1, overflow = TextOverflow.Ellipsis)

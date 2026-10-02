@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Downloading the free General MIDI sound libraries (optional). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- Sampling from the microphone (optional; asked for when you first record a sample). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 

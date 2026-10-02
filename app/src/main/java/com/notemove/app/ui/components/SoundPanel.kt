@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -23,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.notemove.app.ui.StudioUi
 import com.notemove.app.ui.StudioViewModel
+import com.notemove.app.ui.guardTextInput
 import com.notemove.app.ui.theme.NM
 import com.notemove.core.model.DrumKits
 import com.notemove.core.model.DrumSound
@@ -71,10 +73,17 @@ private fun SynthEditor(vm: StudioViewModel, ui: StudioUi) {
     val track = ui.track ?: return
     val p = track.synth ?: SynthPresets.KEYS
     val color = NM.track(track.color)
-    SectionTitle("Preset")
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        for (preset in SynthPresets.ALL) Chip(preset.name, p.name == preset.name, { vm.setSynth(preset, undoable = true) }, color = color)
+    SectionTitle("Preset · ${p.name}")
+    for ((category, presets) in SynthPresets.CATEGORIES) {
+        Row(Modifier.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(category, fontSize = 11.sp, color = NM.textDim, modifier = Modifier.width(84.dp))
+            FlowRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (preset in presets) Chip(preset.name, p.name == preset.name, { vm.setSynth(preset, undoable = true) }, color = color)
+            }
+        }
     }
+    Text("Hundreds more instruments: switch the track to SoundFont and download a free General MIDI library.", fontSize = 11.sp, color = NM.textDim,
+        modifier = Modifier.padding(top = 2.dp))
     SectionTitle("Oscillators")
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text("Osc 1", fontSize = 11.sp, color = NM.textDim)
@@ -139,6 +148,8 @@ private fun DrumEditor(vm: StudioViewModel, ui: StudioUi, onSample: () -> Unit) 
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         for (k in DrumKits.ALL) Chip(k.name, kit.name == k.name, { vm.setKit(k) }, color = color)
     }
+    Text("More: load a loop with Sample… and use \"Slice to pads\", or switch to SoundFont for General MIDI drum kits.", fontSize = 11.sp,
+        color = NM.textDim, modifier = Modifier.padding(top = 4.dp))
     SectionTitle("Pad")
     FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         kit.pads.forEachIndexed { i, pad ->
@@ -154,7 +165,10 @@ private fun DrumEditor(vm: StudioViewModel, ui: StudioUi, onSample: () -> Unit) 
             Chip(s.label, pad.sound == s, { vm.setPad(idx, pad.copy(sound = s, name = if (s == DrumSound.SAMPLE) pad.name else s.label), true); vm.auditionPad(idx) }, color = color)
         }
         Chip("Sample…", false, onSample, color = color)
-        pad.sampleId?.let { sid -> Chip("Edit sample…", false, { vm.openSampleEditor(sid) }, color = color) }
+        pad.sampleId?.let { sid ->
+            Chip("Edit sample…", false, { vm.openSampleEditor(sid) }, color = color)
+            Chip("Slice to pads…", false, { vm.openSlicer(sid) }, color = color)
+        }
     }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Knob("Tune", (pad.tune + 24) / 48f, { vm.setPad(idx, pad.copy(tune = it * 48 - 24)) }, color = color, bipolar = true,
@@ -167,6 +181,12 @@ private fun DrumEditor(vm: StudioViewModel, ui: StudioUi, onSample: () -> Unit) 
             display = { panLabel(it * 2 - 1) })
         Knob("Choke", pad.chokeGroup / 4f, { vm.setPad(idx, pad.copy(chokeGroup = (it * 4).toInt())) }, color = color, default = 0f,
             display = { val g = (it * 4).toInt(); if (g == 0) "Off" else "Grp $g" })
+        if (pad.sound == DrumSound.SAMPLE) {
+            Knob("Start", pad.start, { vm.setPad(idx, pad.copy(start = it.coerceAtMost(pad.end - 0.001f))) }, color = color, default = 0f,
+                display = { "${(it * 100).toInt()}%" })
+            Knob("End", pad.end, { vm.setPad(idx, pad.copy(end = it.coerceAtLeast(pad.start + 0.001f))) }, color = color, default = 1f,
+                display = { "${(it * 100).toInt()}%" })
+        }
     }
 }
 
@@ -178,10 +198,13 @@ private fun SamplerEditor(vm: StudioViewModel, ui: StudioUi, onSample: () -> Uni
     val p = track.sampler ?: SamplerPatch()
     val color = NM.track(track.color)
     SectionTitle("Sample")
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(project.sample(p.sampleId)?.name ?: "No sample loaded", color = NM.text, fontSize = 14.sp)
+    FlowRow(verticalArrangement = Arrangement.spacedBy(6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(project.sample(p.sampleId)?.name ?: "No sample loaded", color = NM.text, fontSize = 14.sp, modifier = Modifier.align(Alignment.CenterVertically))
         Chip("Record / Load…", false, onSample, color = color)
-        p.sampleId?.let { sid -> Chip("Edit (spectral)…", false, { vm.openSampleEditor(sid) }, color = color) }
+        p.sampleId?.let { sid ->
+            Chip("Edit (spectral)…", false, { vm.openSampleEditor(sid) }, color = color)
+            Chip("Slice to pads…", false, { vm.openSlicer(sid) }, color = color)
+        }
     }
     Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         ToggleBox("Loop", p.loop, { vm.setSampler(p.copy(loop = !p.loop), true) }, onColor = color)
@@ -244,6 +267,7 @@ private fun SoundFontEditor(vm: StudioViewModel, ui: StudioUi) {
         Chip("Load .sf2…", false, { picker.launch(arrayOf("*/*")) }, color = color)
     }
     busy?.let { Text(it, fontSize = 12.sp, color = NM.textDim) }
+    FreeSoundLibraries(vm, library, color)
     if (library.isNotEmpty()) {
         SectionTitle("Library")
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -255,7 +279,7 @@ private fun SoundFontEditor(vm: StudioViewModel, ui: StudioUi) {
     if (presets.isNotEmpty()) {
         SectionTitle("Preset · ${patch.presetName}")
         androidx.compose.material3.OutlinedTextField(query, { query = it }, singleLine = true, placeholder = { Text("Search presets") },
-            modifier = Modifier.fillMaxWidth())
+            modifier = Modifier.fillMaxWidth().guardTextInput())
         val shown = presets.filter { query.isBlank() || it.name.contains(query, ignoreCase = true) }.take(160)
         FlowRow(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             for (pr in shown) {
@@ -267,5 +291,29 @@ private fun SoundFontEditor(vm: StudioViewModel, ui: StudioUi) {
     }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Knob("Volume", patch.gain, { vm.setSoundFontGain(it) }, color = color, default = 0.8f)
+    }
+}
+
+/** One-tap downloads of free General MIDI SoundFonts (hundreds of instruments and drum kits). */
+@Composable
+private fun FreeSoundLibraries(vm: StudioViewModel, library: List<com.notemove.core.model.SoundFontRef>, color: androidx.compose.ui.graphics.Color) {
+    val downloads by vm.downloads.collectAsState()
+    SectionTitle("Free sound libraries")
+    for (pack in com.notemove.app.data.SoundLibrary.PACKS) {
+        val installed = library.firstOrNull { it.name == pack.name }
+        val progress = downloads[pack.id]
+        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(pack.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = NM.text)
+                Text(pack.description, fontSize = 11.sp, color = NM.textDim)
+                Text(pack.credit, fontSize = 10.sp, color = NM.textDim)
+                if (progress != null) androidx.compose.material3.LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+            }
+            when {
+                progress != null -> Text("${(progress * 100).toInt()}%", fontSize = 12.sp, color = NM.textDim, modifier = Modifier.padding(start = 8.dp))
+                installed != null -> Chip("Use", false, { vm.useSoundFont(installed) }, Modifier.padding(start = 8.dp), color = color)
+                else -> Chip("Download ${pack.bytes / 1_000_000} MB", false, { vm.downloadSoundPack(pack) }, Modifier.padding(start = 8.dp), color = color)
+            }
+        }
     }
 }

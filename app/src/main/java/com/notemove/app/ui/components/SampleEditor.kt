@@ -186,6 +186,7 @@ fun SampleEditor(vm: StudioViewModel, ui: StudioUi, sampleId: String) {
                         vm.engine.previewSample(data, sr, r?.first ?: viewStart, (r?.last ?: viewEnd))
                     }
                 }) { Icon(if (playhead >= 0) Icons.Filled.Stop else Icons.Filled.PlayArrow, "Preview", tint = NM.play) }
+                TextButton({ if (modified) vm.toast("Save your edits first, then slice") else vm.openSlicer(sampleId) }) { Text("Slice…") }
                 TextButton({ vm.saveSampleAsNew("${ref.name} edit", SampleOps.declick(data, sr)); vm.closeSampleEditor() }, enabled = modified) { Text("Save as new") }
                 TextButton({ vm.replaceSample(sampleId, SampleOps.declick(data, sr)); vm.closeSampleEditor() }, enabled = modified) { Text("Save") }
             }

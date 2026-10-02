@@ -20,7 +20,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerId
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -72,6 +74,7 @@ fun PadGrid(
     val hold by rememberUpdatedState(onHold)
     val active = remember { HashMap<PointerId, PadSpec>() }
     val downAt = remember { HashMap<PointerId, Long>() }
+    val ignored = remember { HashSet<PointerId>() }
     BoxWithConstraints(modifier) {
         val gapPx = with(androidx.compose.ui.platform.LocalDensity.current) { gap.dp.toPx() }
         Column(
@@ -97,7 +100,17 @@ fun PadGrid(
                             val h = size.height.toFloat()
                             val cellW = (w + gapPx) / cols
                             val cellH = (h + gapPx) / rows
+                            // Mouse right-click on a pad = touch & hold (options) without playing it.
+                            if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
+                                val c = event.changes.first()
+                                val col = (c.position.x / cellW).toInt()
+                                val rowFromTop = (c.position.y / cellH).toInt()
+                                if (col in 0 until cols && rowFromTop in 0 until rows) specFn(rows - 1 - rowFromTop, col)?.let { hold?.invoke(it) }
+                                event.changes.forEach { it.consume(); ignored.add(it.id) }
+                                continue
+                            }
                             for (c in event.changes) {
+                                if (c.id in ignored) { c.consume(); if (!c.pressed) ignored.remove(c.id); continue }
                                 val x = c.position.x
                                 val y = c.position.y
                                 val col = (x / cellW).toInt()

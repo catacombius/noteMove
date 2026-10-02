@@ -246,4 +246,4 @@ private fun LoopSelector(vm: StudioViewModel, ui: StudioUi, engine: State<Engine
 
 @OptIn(ExperimentalFoundationApi::class)
 private fun Modifier.combinedClickableCompat(onClick: () -> Unit, onLongClick: (() -> Unit)?): Modifier =
-    this.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+    this.holdClickable(onClick = onClick, onLongClick = onLongClick)

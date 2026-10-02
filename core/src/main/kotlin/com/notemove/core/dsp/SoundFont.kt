@@ -187,7 +187,8 @@ class SoundFont(val name: String, val samples: ShortArray, val presets: List<Pre
                 start = start, end = end, loopStart = ls.coerceIn(start, end), loopEnd = le.coerceIn(start, end),
                 loopMode = inst(54, 0) and 3, sampleRate = s.rate.coerceIn(400, 192000), rootKey = root,
                 tuneCents = add(51, 0) * 100 + add(52, 0) + s.correction, scaleTuning = add(56, 100),
-                gain = 10f.pow(-atten / 200f),
+                // Initial attenuation scaled by 0.4, as FluidSynth and the original EMU hardware do; most .sf2 files are voiced for that.
+                gain = 10f.pow(-atten * 0.4f / 200f),
                 pan = (add(17, 0).coerceIn(-500, 500) / 500f),
                 delay = tc(33, -12000), attack = tc(34, -12000), hold = tc(35, -12000), decay = tc(36, -12000),
                 sustain = 10f.pow(-sustainCb / 200f), release = tc(38, -12000).coerceAtLeast(0.005f),

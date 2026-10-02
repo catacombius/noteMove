@@ -80,7 +80,7 @@ private fun EffectCard(vm: StudioViewModel, target: FxTarget, slot: EffectSlot, 
     ) {
         Box {
             Row(
-                Modifier.fillMaxWidth().combinedClickable(onClick = {}, onLongClick = { menu = true }),
+                Modifier.fillMaxWidth().holdClickable(onClick = {}, onLongClick = { menu = true }),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 ToggleBox(if (slot.enabled) "ON" else "OFF", slot.enabled, { vm.toggleEffect(target, slot.id) }, onColor = color)

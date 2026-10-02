@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Redo
@@ -29,6 +30,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -47,6 +50,7 @@ import com.notemove.app.ui.StudioViewModel
 import com.notemove.app.ui.theme.NM
 import com.notemove.core.engine.EngineState
 import com.notemove.core.model.Scale
+import android.content.res.Configuration
 import java.util.Locale
 import kotlin.math.floor
 
@@ -92,6 +96,17 @@ fun TransportBar(
             IconButton(onClick = vm::toggleMetronome) { Icon(Icons.Filled.Timer, "Metronome", tint = if (ui.metronome) NM.accent else NM.textDim) }
             Chip("Capture", false, vm::capture, color = NM.play)
             Spacer(Modifier.size(4.dp))
+        }
+        // Hardware keyboard attached: show (and toggle) the computer MIDI keyboard.
+        val config = LocalConfiguration.current
+        if (config.keyboard == Configuration.KEYBOARD_QWERTY && config.hardKeyboardHidden != Configuration.HARDKEYBOARDHIDDEN_YES) {
+            val keys by vm.computerKeys.collectAsState()
+            val base = (if (ui.track?.drumLayout == true) keys.drumOctave else keys.octave) + 2
+            Text(
+                if (keys.enabled) "⌨ ${Scale.noteName(base * 12)} · ${keys.velocity}" else "⌨ off",
+                fontSize = 11.sp, color = if (keys.enabled) NM.accent else NM.textDim, maxLines = 1,
+                modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = vm::toggleComputerKeyboard).padding(horizontal = 6.dp, vertical = 4.dp),
+            )
         }
         if (vm.bluetoothOutput) {
             Text("BT ${vm.latencyMs.toInt()}ms", fontSize = 10.sp, color = NM.queued, modifier = Modifier.clickable(onClick = onSettings).padding(horizontal = 4.dp))

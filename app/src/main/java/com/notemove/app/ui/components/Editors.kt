@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -40,6 +41,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
@@ -170,6 +174,7 @@ private fun NoteGrid(
     rowBackground: (Int) -> Color,
     vScroll: androidx.compose.foundation.ScrollState,
     modifier: Modifier = Modifier,
+    onZoom: ((Float) -> Unit)? = null,
 ) {
     val track = ui.track ?: return
     val clip = ui.clip
@@ -184,6 +189,7 @@ private fun NoteGrid(
     val selection by rememberUpdatedState(ui.noteSelection)
     var marquee by remember { mutableStateOf<Rect?>(null) }
     var resizing by remember { mutableStateOf(false) }
+    var mouseBusy by remember { mutableStateOf(false) }
     val hScroll = rememberScrollState()
     val handlePx = with(density) { 16.dp.toPx() }
 
@@ -212,10 +218,46 @@ private fun NoteGrid(
         return notes.firstOrNull { it.pitch == pitch && beat >= it.start - 1e-6 && beat < it.start + max(it.duration, grid * 0.6) }
     }
 
+    /** [orig] shifted by the drag distance [acc], snapped to steps and rows. */
+    fun movedNotes(orig: List<Note>, acc: Offset): List<Note> {
+        val dStep = (acc.x / cw).roundToInt()
+        val dRow = (acc.y / ch).roundToInt()
+        return orig.map { n ->
+            val r = (rows.indexOf(n.pitch) + dRow).coerceIn(0, rows.lastIndex)
+            n.copy(start = (n.start + dStep * grid).coerceIn(0.0, length - grid * 0.5), pitch = rows[r])
+        }
+    }
+
+    fun inMarquee(m: Rect): List<Note> = notes.filter { n ->
+        val r = rows.indexOf(n.pitch)
+        if (r < 0) return@filter false
+        val nr = Rect((n.start / grid * cw).toFloat(), r * ch, ((n.start + max(n.duration, grid * 0.5)) / grid * cw).toFloat(), (r + 1) * ch)
+        nr.overlaps(m)
+    }
+
+    fun addNoteAt(o: Offset) {
+        val step = (o.x / cw).toInt()
+        val r = (o.y / ch).toInt()
+        if (r !in rows.indices || step !in 0 until steps) return
+        val pitch = rows[r]
+        if (clip == null) vm.createClip(track.id, ui.selectedScene)
+        vm.setNotes(notes + Note(pitch, step * grid, noteLength, 100))
+        vm.padDown(pitch, 100); vm.padUp(pitch)
+    }
+
     Box(modifier.verticalScroll(vScroll).horizontalScroll(hScroll)) {
         Canvas(
             Modifier.size(cellW * steps, cellH * rows.size)
-                .pointerInput(steps, grid, rows) {
+                // Mouse wheel scrolls (Shift = sideways), Ctrl + wheel zooms in time.
+                .onWheel { d, mods ->
+                    val stepPx = ch * 3
+                    when {
+                        mods.isCommand -> onZoom?.invoke(if (d.y < 0) 1.15f else 1f / 1.15f)
+                        mods.isShiftPressed -> hScroll.dispatchRawDelta(d.y * stepPx)
+                        else -> { vScroll.dispatchRawDelta(d.y * stepPx); hScroll.dispatchRawDelta(d.x * stepPx) }
+                    }
+                }
+                .pointerInput(steps, grid, rows, cw, ch) {
                     detectTapGestures { o ->
                         val step = (o.x / cw).toInt()
                         val r = (o.y / ch).toInt()
@@ -225,16 +267,10 @@ private fun NoteGrid(
                             if (n != null) vm.toggleNoteSelection(n) else vm.clearNoteSelection()
                             return@detectTapGestures
                         }
-                        if (n != null) vm.setNotes(notes - n)
-                        else {
-                            val pitch = rows[r]
-                            if (clip == null) vm.createClip(track.id, ui.selectedScene)
-                            vm.setNotes(notes + Note(pitch, step * grid, noteLength, 100))
-                            vm.padDown(pitch, 100); vm.padUp(pitch)
-                        }
+                        if (n != null) vm.setNotes(notes - n) else addNoteAt(o)
                     }
                 }
-                .pointerInput(steps, grid, rows) {
+                .pointerInput(steps, grid, rows, cw, ch) {
                     var mode = 0 // 1 = move, 2 = marquee
                     var start = Offset.Zero
                     var acc = Offset.Zero
@@ -242,7 +278,7 @@ private fun NoteGrid(
                     var current: Set<Note> = emptySet()
                     detectDragGesturesAfterLongPress(
                         onDragStart = { o ->
-                            if (resizing) { mode = 0; return@detectDragGesturesAfterLongPress }
+                            if (resizing || mouseBusy) { mode = 0; return@detectDragGesturesAfterLongPress }
                             start = o; acc = Offset.Zero
                             val n = hit(o)
                             if (n != null) {
@@ -255,35 +291,20 @@ private fun NoteGrid(
                             }
                         },
                         onDragEnd = {
-                            if (mode == 2) {
-                                val m = marquee
-                                if (m != null) {
-                                    val picked = notes.filter { n ->
-                                        val r = rows.indexOf(n.pitch)
-                                        if (r < 0) return@filter false
-                                        val nr = Rect((n.start / grid * cw).toFloat(), r * ch, ((n.start + max(n.duration, grid * 0.5)) / grid * cw).toFloat(), (r + 1) * ch)
-                                        nr.overlaps(m)
-                                    }
-                                    vm.setNoteSelection(selection + picked)
-                                }
-                            }
-                            marquee = null; mode = 0
+                            if (mode == 2) marquee?.let { m -> vm.setNoteSelection(selection + inMarquee(m)) }
+                            if (mode != 0) marquee = null
+                            mode = 0
                         },
-                        onDragCancel = { marquee = null; mode = 0 },
+                        onDragCancel = { if (mode != 0) marquee = null; mode = 0 },
                     ) { c, d ->
-                        if (resizing) return@detectDragGesturesAfterLongPress
+                        if (resizing || mode == 0) return@detectDragGesturesAfterLongPress
                         c.consume()
                         acc += d
                         if (mode == 2) {
                             val p = start + acc
                             marquee = Rect(min(start.x, p.x), min(start.y, p.y), max(start.x, p.x), max(start.y, p.y))
                         } else if (mode == 1) {
-                            val dStep = (acc.x / cw).roundToInt()
-                            val dRow = (acc.y / ch).roundToInt()
-                            val moved = orig.map { n ->
-                                val r = (rows.indexOf(n.pitch) + dRow).coerceIn(0, rows.lastIndex)
-                                n.copy(start = (n.start + dStep * grid).coerceIn(0.0, length - grid * 0.5), pitch = rows[r])
-                            }
+                            val moved = movedNotes(orig, acc)
                             if (moved.toSet() != current) {
                                 vm.replaceNotes(current, moved)
                                 current = moved.toSet()
@@ -291,11 +312,82 @@ private fun NoteGrid(
                         }
                     }
                 }
+                // Mouse: click empty = add a note (or deselect), click a note = select it (Shift/Ctrl = add to the
+                // selection), double-click a note = delete it, drag a note = move (Ctrl + drag = copy), drag empty
+                // space = box-select, right-click a note = add it to the selection.
+                .pointerInput(steps, grid, rows, cw, ch) {
+                    var lastClickAt = 0L
+                    var lastClickNote: Note? = null
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = true)
+                        if (down.type != PointerType.Mouse) return@awaitEachGesture
+                        val mods = currentEvent.keyboardModifiers
+                        val additive = mods.isShiftPressed || mods.isCommand
+                        val copy = mods.isCommand
+                        val secondary = currentEvent.buttons.isSecondaryPressed
+                        down.consume()
+                        mouseBusy = true
+                        val n = hit(down.position)
+                        var mode = 0 // 1 = move, 2 = marquee
+                        var acc = Offset.Zero
+                        var orig: List<Note> = emptyList()
+                        var current: Set<Note> = emptySet()
+                        val slop = viewConfiguration.touchSlop / 2
+                        while (true) {
+                            val ev = awaitPointerEvent()
+                            val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!c.pressed) { c.consume(); break }
+                            acc += c.positionChange()
+                            c.consume()
+                            if (secondary) continue
+                            if (mode == 0 && acc.getDistance() > slop) {
+                                if (n != null) {
+                                    val sel = when { n in selection -> selection; additive -> selection + n; else -> setOf(n) }
+                                    vm.checkpoint()
+                                    orig = sel.toList()
+                                    if (copy) vm.setNoteSelection(emptySet()) else { current = sel; vm.setNoteSelection(sel) }
+                                    mode = 1
+                                } else mode = 2
+                            }
+                            if (mode == 1) {
+                                val moved = movedNotes(orig, acc)
+                                if (copy && moved == orig) {
+                                    if (current.isNotEmpty()) { vm.replaceNotes(current, emptyList(), select = false); current = emptySet() }
+                                } else if (moved.toSet() != current) {
+                                    vm.replaceNotes(current, moved)
+                                    current = moved.toSet()
+                                }
+                            } else if (mode == 2) {
+                                val p = down.position + acc
+                                marquee = Rect(min(down.position.x, p.x), min(down.position.y, p.y), max(down.position.x, p.x), max(down.position.y, p.y))
+                            }
+                        }
+                        when {
+                            secondary -> if (n != null) vm.setNoteSelection(selection + n) else vm.clearNoteSelection()
+                            mode == 2 -> marquee?.let { m -> vm.setNoteSelection((if (additive) selection else emptySet()) + inMarquee(m)) }
+                            mode == 0 -> {
+                                val now = System.currentTimeMillis()
+                                val double = n != null && n == lastClickNote && now - lastClickAt < 400
+                                lastClickAt = now; lastClickNote = n
+                                when {
+                                    double && n != null -> { vm.setNotes(notes - n); vm.setNoteSelection(selection - n); lastClickNote = null }
+                                    n != null && additive -> vm.toggleNoteSelection(n)
+                                    n != null -> { vm.setNoteSelection(setOf(n)); vm.padDown(n.pitch, n.velocity); vm.padUp(n.pitch) }
+                                    selection.isNotEmpty() && !additive -> vm.clearNoteSelection()
+                                    else -> addNoteAt(down.position)
+                                }
+                            }
+                        }
+                        marquee = null
+                        mouseBusy = false
+                    }
+                }
                 // Length handles: drag the ▸ at a note's end (or ◂ at the start of selected notes) to resize.
                 // Dragging a handle of a selected note resizes the whole selection by the same amount.
-                .pointerInput(steps, grid, rows) {
+                .pointerInput(steps, grid, rows, cw, ch) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
+                        if (currentEvent.buttons.isSecondaryPressed) return@awaitEachGesture
                         val (note, side) = handleHit(down.position) ?: return@awaitEachGesture
                         down.consume()
                         resizing = true
@@ -376,7 +468,8 @@ private fun NoteGrid(
 
 /** Drum step sequencer: one row per pad (pad 16 on top, like the pad grid). */
 @Composable
-fun DrumStepGrid(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, modifier: Modifier = Modifier, cell: Dp = 30.dp) {
+fun DrumStepGrid(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, modifier: Modifier = Modifier, cell: Dp = 30.dp,
+                 cellW: Dp = cell, onZoom: ((Float) -> Unit)? = null) {
     val track = ui.track ?: return
     val rows = remember { (DRUM_PAD_COUNT - 1 downTo 0).map { DRUM_BASE_NOTE + it } }
     val vScroll = rememberScrollState()
@@ -395,15 +488,16 @@ fun DrumStepGrid(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, 
                 }
             }
         }
-        NoteGrid(vm, ui, engine, rows, cell, cell, ui.stepGrid * 0.95, { p ->
+        NoteGrid(vm, ui, engine, rows, cellW, cell, ui.stepGrid * 0.95, { p ->
             if (p - DRUM_BASE_NOTE == ui.selectedPad) NM.surfaceHigh else NM.pad.copy(alpha = 0.55f)
-        }, vScroll, Modifier.weight(1f))
+        }, vScroll, Modifier.weight(1f), onZoom)
     }
 }
 
 /** Piano roll. Rows are pitches (only in-scale rows when "In Key" is on). */
 @Composable
-fun NoteEditor(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, modifier: Modifier = Modifier, cellW: Dp = 28.dp, cellH: Dp = 26.dp) {
+fun NoteEditor(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, modifier: Modifier = Modifier, cellW: Dp = 28.dp, cellH: Dp = 26.dp,
+               onZoom: ((Float) -> Unit)? = null) {
     val project = ui.project ?: return
     val track = ui.track ?: return
     val clip = ui.clip
@@ -434,7 +528,7 @@ fun NoteEditor(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, mo
         NoteGrid(vm, ui, engine, rows, cellW, cellH, ui.stepGrid, { p ->
             val black = Scale.NOTE_NAMES[p % 12].contains('#')
             if (black && !inKey) NM.padDim else NM.pad.copy(alpha = 0.55f)
-        }, vScroll, Modifier.weight(1f))
+        }, vScroll, Modifier.weight(1f), onZoom)
     }
 }
 
@@ -442,21 +536,23 @@ fun NoteEditor(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, mo
 @Composable
 fun ClipEditor(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, modifier: Modifier = Modifier, compact: Boolean = false) {
     val track = ui.track ?: return
+    var zoom by remember { mutableFloatStateOf(1f) }
+    val onZoom: (Float) -> Unit = { f -> zoom = (zoom * f).coerceIn(0.4f, 3f) }
     Column(modifier) {
         if (ui.noteSelection.isNotEmpty()) NoteSelectionBar(vm, ui) else ClipToolbar(vm, ui)
         Box(Modifier.weight(1f).fillMaxWidth().padding(top = 6.dp)) {
             if (track.drumLayout) {
                 BoxWithConstraints(Modifier.fillMaxSize()) {
                     val cell = ((maxHeight - 2.dp) / DRUM_PAD_COUNT).coerceIn(18.dp, if (compact) 30.dp else 40.dp)
-                    DrumStepGrid(vm, ui, engine, Modifier.fillMaxSize(), cell = cell)
+                    DrumStepGrid(vm, ui, engine, Modifier.fillMaxSize(), cell = cell, cellW = cell * zoom, onZoom = onZoom)
                 }
             } else {
-                NoteEditor(vm, ui, engine, Modifier.fillMaxSize(), cellW = if (compact) 26.dp else 32.dp)
+                NoteEditor(vm, ui, engine, Modifier.fillMaxSize(), cellW = (if (compact) 26.dp else 32.dp) * zoom, onZoom = onZoom)
             }
         }
         Text(
             if (ui.clip == null) "Empty slot: tap the grid to start a clip, or press Record."
-            else "Tap to add/remove · drag ▸ at a note's end to change its length (selected notes: ◂ ▸, all together) · hold a note to select & move · hold empty space to box-select",
+            else "Tap to add/remove · drag ▸ at a note's end to change its length (selected notes: ◂ ▸, all together) · hold a note to select & move · hold empty space to box-select · mouse: click, drag, double-click, Ctrl+wheel to zoom",
             Modifier.padding(4.dp), fontSize = 11.sp, color = NM.textDim, fontWeight = FontWeight.Medium,
         )
     }
