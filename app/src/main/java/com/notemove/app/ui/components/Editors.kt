@@ -2,6 +2,8 @@ package com.notemove.app.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -36,8 +38,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -179,7 +183,27 @@ private fun NoteGrid(
     val notes by rememberUpdatedState(clip?.notes ?: emptyList())
     val selection by rememberUpdatedState(ui.noteSelection)
     var marquee by remember { mutableStateOf<Rect?>(null) }
+    var resizing by remember { mutableStateOf(false) }
     val hScroll = rememberScrollState()
+    val handlePx = with(density) { 16.dp.toPx() }
+
+    /**
+     * Finds the length handle under [o]: +1 = right edge (every note), -1 = left edge (selected notes).
+     * Selected notes win so a whole selection can be resized from any of its notes.
+     */
+    fun handleHit(o: Offset): Pair<Note, Int>? {
+        val r = (o.y / ch).toInt()
+        val pitch = rows.getOrNull(r) ?: return null
+        val candidates = notes.filter { it.pitch == pitch }.sortedByDescending { it in selection }
+        for (n in candidates) {
+            val left = (n.start / grid * cw).toFloat()
+            val right = (n.end / grid * cw).toFloat()
+            val inside = handlePx * 0.75f
+            if (o.x in (right - minOf(inside, (right - left) / 2))..(right + handlePx)) return n to 1
+            if (n in selection && o.x in (left - handlePx)..(left + minOf(inside, (right - left) / 2))) return n to -1
+        }
+        return null
+    }
 
     fun hit(o: Offset): Note? {
         val r = (o.y / ch).toInt()
@@ -218,6 +242,7 @@ private fun NoteGrid(
                     var current: Set<Note> = emptySet()
                     detectDragGesturesAfterLongPress(
                         onDragStart = { o ->
+                            if (resizing) { mode = 0; return@detectDragGesturesAfterLongPress }
                             start = o; acc = Offset.Zero
                             val n = hit(o)
                             if (n != null) {
@@ -246,6 +271,7 @@ private fun NoteGrid(
                         },
                         onDragCancel = { marquee = null; mode = 0 },
                     ) { c, d ->
+                        if (resizing) return@detectDragGesturesAfterLongPress
                         c.consume()
                         acc += d
                         if (mode == 2) {
@@ -264,6 +290,43 @@ private fun NoteGrid(
                             }
                         }
                     }
+                }
+                // Length handles: drag the ▸ at a note's end (or ◂ at the start of selected notes) to resize.
+                // Dragging a handle of a selected note resizes the whole selection by the same amount.
+                .pointerInput(steps, grid, rows) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val (note, side) = handleHit(down.position) ?: return@awaitEachGesture
+                        down.consume()
+                        resizing = true
+                        val wasSelected = note in selection
+                        val targets = if (wasSelected) selection.toList() else listOf(note)
+                        val minDur = grid / 4
+                        var current = targets.toSet()
+                        var acc = 0f
+                        vm.checkpoint()
+                        while (true) {
+                            val ev = awaitPointerEvent()
+                            val c = ev.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!c.pressed) { c.consume(); break }
+                            acc += c.positionChange().x
+                            c.consume()
+                            val delta = (acc / cw).roundToInt() * grid
+                            val resized = targets.map { n ->
+                                if (side > 0) n.copy(duration = (n.duration + delta).coerceIn(min(minDur, n.duration), max(minDur, length - n.start)))
+                                else {
+                                    val end = n.end
+                                    val ns = (n.start + delta).coerceIn(0.0, max(0.0, end - minDur))
+                                    n.copy(start = ns, duration = end - ns)
+                                }
+                            }
+                            if (resized.toSet() != current) {
+                                vm.replaceNotes(current, resized, select = wasSelected)
+                                current = resized.toSet()
+                            }
+                        }
+                        resizing = false
+                    }
                 },
         ) {
             rows.forEachIndexed { r, p -> drawRect(rowBackground(p), Offset(0f, r * ch), Size(size.width, ch - 1f)) }
@@ -281,6 +344,22 @@ private fun NoteGrid(
                 val sel = n in selection
                 drawRoundRect(color.copy(alpha = 0.4f + 0.6f * n.velocity / 127f), Offset(x + 1f, r * ch + 2f), Size(w, ch - 4f), CornerRadius(6f))
                 if (sel) drawRoundRect(Color.White, Offset(x + 1f, r * ch + 2f), Size(w, ch - 4f), CornerRadius(6f), style = Stroke(3f))
+                // Length handles
+                val cy = r * ch + ch / 2
+                val half = min(ch * 0.22f, handlePx * 0.38f)
+                val xr = x + 1f + w
+                val arrowColor = Color.White.copy(alpha = if (sel) 0.95f else 0.6f)
+                drawPath(Path().apply {
+                    moveTo(xr - half * 1.4f, cy - half); lineTo(xr - half * 1.4f, cy + half); lineTo(xr - 1f, cy); close()
+                }, arrowColor)
+                if (sel) {
+                    drawLine(Color.White, Offset(xr - 1.5f, r * ch + 4f), Offset(xr - 1.5f, (r + 1) * ch - 4f), 3f)
+                    val xl = x + 1f
+                    drawPath(Path().apply {
+                        moveTo(xl + half * 1.4f, cy - half); lineTo(xl + half * 1.4f, cy + half); lineTo(xl + 1f, cy); close()
+                    }, arrowColor)
+                    drawLine(Color.White, Offset(xl + 1.5f, r * ch + 4f), Offset(xl + 1.5f, (r + 1) * ch - 4f), 3f)
+                }
             }
             marquee?.let { m ->
                 drawRect(Color.White.copy(alpha = 0.12f), m.topLeft, m.size)
@@ -377,7 +456,7 @@ fun ClipEditor(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, mo
         }
         Text(
             if (ui.clip == null) "Empty slot: tap the grid to start a clip, or press Record."
-            else "Tap to add/remove · hold a note to select & drag · hold empty space to box-select",
+            else "Tap to add/remove · drag ▸ at a note's end to change its length (selected notes: ◂ ▸, all together) · hold a note to select & move · hold empty space to box-select",
             Modifier.padding(4.dp), fontSize = 11.sp, color = NM.textDim, fontWeight = FontWeight.Medium,
         )
     }

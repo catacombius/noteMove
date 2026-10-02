@@ -176,8 +176,9 @@ private fun rateLabel(r: Double) = ClipOps.GRIDS.firstOrNull { kotlin.math.abs(i
 
 /**
  * Move's row of 16 step buttons: steps of the selected drum pad, or of the last played note on a
- * melodic track. Tap a step to toggle it; the lit step follows the playhead.
+ * melodic track. Tap a step to toggle it; swipe sideways to slide between pages (at least two).
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun StepStrip(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, modifier: Modifier = Modifier, rowsOf8: Boolean = false) {
     val track = ui.track ?: return
@@ -186,48 +187,49 @@ fun StepStrip(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, mod
     val pitch = if (track.drumLayout) DRUM_BASE_NOTE + ui.selectedPad else ui.lastPlayedPitch
     val pageBeats = grid * 16
     val length = clip?.lengthBeats ?: (ui.newClipBars * 4.0)
-    val pages = kotlin.math.ceil(length / pageBeats).toInt().coerceAtLeast(1)
-    val page = ui.stepPage.coerceIn(0, pages - 1)
+    val pages = sequencerPages(ui, pageBeats)
+    val inClipPages = kotlin.math.ceil(length / pageBeats - 1e-9).toInt()
     val head = playheadIn(engine.value, track, ui.selectedScene, clip)
     val color = NM.track(track.color)
     val pitches = if (track.drumLayout) setOf(pitch) else ui.heldPitches.ifEmpty { setOf(pitch) }
+    val pager = rememberStepPagerState(ui, pages)
     Column(modifier) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(if (track.drumLayout) "Steps · ${PadLayouts.padName(track, ui.selectedPad)}" else "Steps · ${pitches.sorted().joinToString { Scale.noteName(it) }}",
                 color = NM.textDim, fontSize = 11.sp)
             Spacer(Modifier.weight(1f))
-            for (p in 0 until pages) {
-                Box(Modifier.width(18.dp).height(6.dp).clip(RoundedCornerShape(3.dp))
-                    .background(if (p == page) NM.text else NM.line).clickable { vm.setStepPage(p) })
-            }
+            PageDots(pager, pages, inClipPages)
         }
         Spacer(Modifier.height(4.dp))
-        val perRow = if (rowsOf8) 8 else 16
-        for (r in 0 until 16 / perRow) {
-            Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                for (k in 0 until perRow) {
-                    val i = r * perRow + k
-                    val start = page * pageBeats + i * grid
-                    val inClip = start < length - 1e-9
-                    val on = clip != null && pitches.any { p -> clip.notes.any { it.pitch == p && kotlin.math.abs(it.start - start) < grid / 2 } }
-                    val isHead = head != null && head >= start && head < start + grid
-                    val beatStart = (i % 4 == 0)
-                    Box(
-                        Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(6.dp))
-                            .background(
-                                when {
-                                    !inClip -> NM.padDim.copy(alpha = 0.4f)
-                                    on -> color
-                                    beatStart -> NM.surfaceHigh
-                                    else -> NM.pad.copy(alpha = 0.7f)
-                                },
+        StepPager(vm, ui, pages, Modifier.weight(1f).fillMaxWidth(), pager) { page ->
+            val perRow = if (rowsOf8) 8 else 16
+            Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                for (r in 0 until 16 / perRow) {
+                    Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        for (k in 0 until perRow) {
+                            val i = r * perRow + k
+                            val start = page * pageBeats + i * grid
+                            val inClip = start < length - 1e-9
+                            val on = clip != null && pitches.any { p -> clip.notes.any { it.pitch == p && kotlin.math.abs(it.start - start) < grid / 2 } }
+                            val isHead = head != null && head >= start && head < start + grid
+                            val beatStart = (i % 4 == 0)
+                            Box(
+                                Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(6.dp))
+                                    .background(
+                                        when {
+                                            on -> color
+                                            !inClip -> NM.padDim.copy(alpha = 0.5f)
+                                            beatStart -> NM.surfaceHigh
+                                            else -> NM.pad.copy(alpha = 0.7f)
+                                        },
+                                    )
+                                    .then(if (isHead) Modifier.border(2.dp, Color.White, RoundedCornerShape(6.dp)) else Modifier)
+                                    .clickable { vm.toggleStepAt(pitches, start, grid, pageBeats) },
                             )
-                            .then(if (isHead) Modifier.border(2.dp, Color.White, RoundedCornerShape(6.dp)) else Modifier)
-                            .clickable(enabled = inClip) { for (p in pitches) vm.toggleStep(p, start, grid) },
-                    )
+                        }
+                    }
                 }
             }
-            if (r == 0 && perRow == 8) Spacer(Modifier.height(4.dp))
         }
     }
 }

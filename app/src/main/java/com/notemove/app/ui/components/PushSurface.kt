@@ -89,7 +89,9 @@ private fun SequenceSurface(vm: StudioViewModel, ui: StudioUi, engine: State<Eng
     val steps = stepRows * cols
     val pageBeats = steps * ui.stepGrid
     val length = ui.clip?.lengthBeats ?: (ui.newClipBars * 4.0)
-    val pages = ceil(length / pageBeats - 1e-9).toInt().coerceAtLeast(1)
+    val pages = sequencerPages(ui, pageBeats)
+    val inClipPages = ceil(length / pageBeats - 1e-9).toInt()
+    val pager = rememberStepPagerState(ui, pages)
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // Page strip (always visible; drums on wide grids also get the Push loop selector below).
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -97,14 +99,11 @@ private fun SequenceSurface(vm: StudioViewModel, ui: StudioUi, engine: State<Eng
                 if (drums) "Sequencing ${PadLayouts.padName(track, ui.selectedPad)}" else "Sequencing ${pitches.sorted().joinToString { Scale.noteName(it) }}",
                 fontSize = 11.sp, color = NM.textDim, modifier = Modifier.weight(1f),
             )
-            for (p in 0 until pages.coerceAtMost(16)) {
-                Box(Modifier.padding(horizontal = 1.dp).clip(RoundedCornerShape(3.dp))
-                    .background(if (p == ui.stepPage.coerceAtMost(pages - 1)) NM.text else NM.line)
-                    .combinedClickableCompat({ vm.setStepPage(p) }, null)
-                    .padding(horizontal = 9.dp, vertical = 3.dp))
-            }
+            PageDots(pager, pages, inClipPages)
         }
-        StepGrid(vm, ui, engine, stepRows, cols, pitches, Modifier.weight(stepRows.toFloat()).fillMaxWidth())
+        StepPager(vm, ui, pages, Modifier.weight(stepRows.toFloat()).fillMaxWidth(), pager) { page ->
+            StepGrid(vm, ui, engine, stepRows, cols, pitches, page, Modifier.fillMaxSize())
+        }
         Box(Modifier.weight(padRows.toFloat()).fillMaxWidth()) {
             val sounding = soundingPitches(engine.value, track)
             if (drums) {
@@ -133,15 +132,13 @@ private fun SequenceSurface(vm: StudioViewModel, ui: StudioUi, engine: State<Eng
  * opens velocity / length / nudge options for the step.
  */
 @Composable
-private fun StepGrid(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, rows: Int, cols: Int, pitches: Set<Int>, modifier: Modifier) {
+private fun StepGrid(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, rows: Int, cols: Int, pitches: Set<Int>, page: Int, modifier: Modifier) {
     val track = ui.track ?: return
     val clip = ui.clip
     val grid = ui.stepGrid
     val steps = rows * cols
     val pageBeats = steps * grid
     val length = clip?.lengthBeats ?: (ui.newClipBars * 4.0)
-    val pages = ceil(length / pageBeats - 1e-9).toInt().coerceAtLeast(1)
-    val page = ui.stepPage.coerceIn(0, pages - 1)
     val head = playheadIn(engine.value, track, ui.selectedScene, clip)
     val color = NM.track(track.color)
     var holdStep by remember { mutableStateOf<Double?>(null) }
@@ -161,15 +158,15 @@ private fun StepGrid(vm: StudioViewModel, ui: StudioUi, engine: State<EngineStat
                             Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(8.dp))
                                 .background(
                                     when {
-                                        !inClip -> NM.padDim.copy(alpha = 0.35f)
                                         own != null -> color.copy(alpha = 0.35f + 0.65f * own.velocity / 127f)
+                                        !inClip -> NM.padDim.copy(alpha = 0.5f)
                                         beat -> NM.surfaceHigh
                                         else -> NM.pad
                                     },
                                 )
                                 .border(if (isHead) 2.dp else 0.dp, if (isHead) Color.White else Color.Transparent, RoundedCornerShape(8.dp))
                                 .combinedClickableCompat(
-                                    { if (inClip) for (p in pitches) vm.toggleStep(p, start, grid) },
+                                    { vm.toggleStepAt(pitches, start, grid, pageBeats) },
                                     { if (inClip) holdStep = start },
                                 ),
                             contentAlignment = Alignment.Center,
@@ -185,7 +182,7 @@ private fun StepGrid(vm: StudioViewModel, ui: StudioUi, engine: State<EngineStat
             if (hs != null) {
                 val has = clip?.notes?.any { it.pitch in pitches && abs(it.start - hs) < grid / 2 } == true
                 Text("  Step ${((hs / grid).toInt() % steps) + 1}", fontSize = 12.sp, color = NM.textDim)
-                if (!has) DropdownMenuItem({ Text("Add note") }, { holdStep = null; for (p in pitches) vm.toggleStep(p, hs, grid) })
+                if (!has) DropdownMenuItem({ Text("Add note") }, { holdStep = null; vm.toggleStepAt(pitches, hs, grid, pageBeats) })
                 if (has) {
                     for ((label, v) in listOf("Soft (40)" to 40, "Medium (80)" to 80, "Hard (110)" to 110, "Accent (127)" to 127)) {
                         DropdownMenuItem({ Text("Velocity $label") }, { holdStep = null; vm.editStepNotes(pitches, hs, grid) { it.copy(velocity = v) } })

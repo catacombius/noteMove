@@ -924,9 +924,28 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /** Swaps [old] notes for [new] ones (moving a selection) and selects the new ones. */
-    fun replaceNotes(old: Set<Note>, new: List<Note>) {
+    fun replaceNotes(old: Set<Note>, new: List<Note>, select: Boolean = true) {
         editClip(undoable = false) { c -> c.withNotes(c.notes.filter { it !in old } + new) }
-        _ui.update { it.copy(noteSelection = new.toSet()) }
+        if (select) _ui.update { it.copy(noteSelection = new.toSet()) }
+    }
+
+    /**
+     * Toggles [pitches] on the step at [start]. Steps on pages past the clip's end extend the clip to
+     * include that page, so the sequencer always has room to the right.
+     */
+    fun toggleStepAt(pitches: Set<Int>, start: Double, grid: Double, pageBeats: Double) {
+        val s = _ui.value
+        val t = s.track ?: return
+        val needLen = kotlin.math.ceil((start + grid - 1e-9) / pageBeats) * pageBeats
+        val clip = t.clips[s.selectedScene]
+        if (clip == null) {
+            createClip(t.id, s.selectedScene)
+            val made = _ui.value.clip
+            if (made != null && made.lengthBeats < needLen) setClipLength(needLen)
+        } else if (start >= clip.lengthBeats - 1e-9) {
+            setClipLength(needLen)
+        }
+        for (p in pitches) toggleStep(p, start, grid)
     }
 
     private var padClipboard: DrumPad? = null
