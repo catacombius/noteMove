@@ -10,6 +10,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -45,6 +51,7 @@ fun SoundPanel(vm: StudioViewModel, ui: StudioUi, onSample: () -> Unit, modifier
             TrackKind.SYNTH -> SynthEditor(vm, ui)
             TrackKind.DRUMS -> DrumEditor(vm, ui, onSample)
             TrackKind.SAMPLER -> SamplerEditor(vm, ui, onSample)
+            TrackKind.SOUNDFONT -> SoundFontEditor(vm, ui)
         }
         SectionTitle("Track effects")
         val fx = track.fx
@@ -214,4 +221,51 @@ fun panLabel(p: Float): String = when {
     kotlin.math.abs(p) < 0.02f -> "C"
     p < 0 -> "${(-p * 50).toInt()}L"
     else -> "${(p * 50).toInt()}R"
+}
+
+/** Load .sf2 files and pick a preset (bank:program). Bank 128 presets are General MIDI drum kits. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SoundFontEditor(vm: StudioViewModel, ui: StudioUi) {
+    val track = ui.track ?: return
+    val patch = track.soundfont ?: com.notemove.core.model.SoundFontPatch()
+    val color = NM.track(track.color)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val library by vm.fontLibrary.collectAsState()
+    val busy by vm.fontBusy.collectAsState()
+    val fontsVersion by vm.fontsVersion.collectAsState()
+    var query by remember { mutableStateOf("") }
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) vm.importSoundFont(uri, displayName(context, uri))
+    }
+    SectionTitle("SoundFont")
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(patch.fontName.ifBlank { "No SoundFont loaded" }, color = NM.text, fontSize = 14.sp)
+        Chip("Load .sf2…", false, { picker.launch(arrayOf("*/*")) }, color = color)
+    }
+    busy?.let { Text(it, fontSize = 12.sp, color = NM.textDim) }
+    if (library.isNotEmpty()) {
+        SectionTitle("Library")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            for (ref in library) Chip(ref.name, ref.id == patch.fontId, { vm.useSoundFont(ref) }, color = color)
+        }
+    }
+    val presets = remember(patch.fontId, fontsVersion) { vm.presetsOf(patch.fontId) }
+    if (patch.fontId != null && presets.isEmpty() && busy == null) Text("Loading presets…", fontSize = 12.sp, color = NM.textDim)
+    if (presets.isNotEmpty()) {
+        SectionTitle("Preset · ${patch.presetName}")
+        androidx.compose.material3.OutlinedTextField(query, { query = it }, singleLine = true, placeholder = { Text("Search presets") },
+            modifier = Modifier.fillMaxWidth())
+        val shown = presets.filter { query.isBlank() || it.name.contains(query, ignoreCase = true) }.take(160)
+        FlowRow(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            for (pr in shown) {
+                Chip(if (pr.bank == 128) "🥁 ${pr.name}" else "${pr.program + 1} ${pr.name}", pr.bank == patch.bank && pr.program == patch.program,
+                    { vm.setSoundFontPreset(pr) }, color = color)
+            }
+        }
+        Text("Bank 128 presets are drum kits and use the drum pad layout (C1 = Kick).", fontSize = 11.sp, color = NM.textDim, modifier = Modifier.padding(top = 4.dp))
+    }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Knob("Volume", patch.gain, { vm.setSoundFontGain(it) }, color = color, default = 0.8f)
+    }
 }

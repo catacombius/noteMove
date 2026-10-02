@@ -93,6 +93,9 @@ fun TransportBar(
             Chip("Capture", false, vm::capture, color = NM.play)
             Spacer(Modifier.size(4.dp))
         }
+        if (vm.bluetoothOutput) {
+            Text("BT ${vm.latencyMs.toInt()}ms", fontSize = 10.sp, color = NM.queued, modifier = Modifier.clickable(onClick = onSettings).padding(horizontal = 4.dp))
+        }
         RoundButton(if (playing) NM.play else NM.surfaceHigh, onClick = vm::togglePlay) {
             Icon(if (playing) Icons.Filled.Stop else Icons.Filled.PlayArrow, if (playing) "Stop" else "Play", tint = if (playing) Color.Black else NM.text)
         }

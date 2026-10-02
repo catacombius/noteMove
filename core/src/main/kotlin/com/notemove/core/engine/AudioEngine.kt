@@ -58,6 +58,8 @@ data class EngineState(
     val masterPeak: Float = 0f,
     val publishedAtNanos: Long = 0L,
     val tempo: Double = 120.0,
+    /** Time between rendering audio and hearing it (incl. Bluetooth); visuals are delayed by this much. */
+    val outputLatencyMs: Double = 0.0,
 ) {
     /** Position inside the clip currently playing on [trackId], or null. */
     fun clipPosition(trackId: String, clip: Clip?, nowNanos: Long = System.nanoTime()): Double? {
@@ -68,8 +70,9 @@ data class EngineState(
         return (beat - start) % clip.lengthBeats
     }
 
+    /** The beat you are hearing right now (rendered position minus output latency). */
     fun estimatedBeat(nowNanos: Long = System.nanoTime()): Double =
-        if (!playing) songBeat else songBeat + (nowNanos - publishedAtNanos) / 1e9 * tempo / 60.0
+        if (!playing) songBeat else songBeat + ((nowNanos - publishedAtNanos) / 1e9 - outputLatencyMs / 1000.0) * tempo / 60.0
 }
 
 class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank(), val soundFonts: SoundFontBank = SoundFontBank()) {
@@ -102,6 +105,8 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank(), v
 
     /** Output latency of the device in frames; used to place live-played notes where the player heard them. */
     @Volatile var outputLatencyFrames: Int = 0
+    /** Extra user-set compensation for recording (e.g. Bluetooth headphones that under-report their delay). */
+    @Volatile var extraLatencyMs: Double = 0.0
     @Volatile var metronomeEnabled: Boolean = false
     @Volatile var metronomeLevel: Float = 0.5f
 
@@ -278,7 +283,7 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank(), v
         freeBeat += n * bpf
     }
 
-    private fun latencyBeats(): Double = outputLatencyFrames * beatsPerFrame()
+    private fun latencyBeats(): Double = outputLatencyFrames * beatsPerFrame() + extraLatencyMs / 1000.0 * (project?.tempo ?: 120.0) / 60.0
 
     private fun processCommands(p: Project, b0: Double) {
         while (true) {
@@ -567,6 +572,7 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank(), v
             masterPeak = masterPeak,
             publishedAtNanos = now,
             tempo = project?.tempo ?: 120.0,
+            outputLatencyMs = outputLatencyFrames * 1000.0 / sampleRate + extraLatencyMs,
         )
     }
 

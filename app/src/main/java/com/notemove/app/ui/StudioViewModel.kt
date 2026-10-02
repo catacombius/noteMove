@@ -29,6 +29,9 @@ import com.notemove.core.model.Note
 import com.notemove.core.model.Project
 import com.notemove.core.model.SampleRef
 import com.notemove.core.model.SamplerPatch
+import com.notemove.core.model.SoundFontPatch
+import com.notemove.core.model.SoundFontRef
+import com.notemove.core.dsp.SoundFont
 import com.notemove.core.model.SynthPatch
 import com.notemove.core.model.SynthPresets
 import com.notemove.core.model.Track
@@ -49,6 +52,14 @@ import java.io.File
 
 /** The views the editor area can show (bottom tabs on the outer screen, side tabs on the inner screen). */
 enum class Panel(val label: String) { SESSION("Session"), PLAY("Play"), EDIT("Edit"), SOUND("Sound"), FX("FX"), MIX("Mix") }
+
+/** Push-style pad modes: play the full grid, or split it into step sequencer (top) and pads (bottom). */
+enum class PadMode(val label: String) { PLAY("Play"), SEQUENCE("Sequence") }
+
+/** Interval between pad rows in the melodic layout (Push's "Layout" setting). */
+enum class RowLayout(val label: String, val inKeySteps: Int, val semitones: Int) {
+    FOURTHS("4ths", 3, 5), THIRDS("3rds", 2, 4), SEQUENTIAL("Sequential", -1, -1)
+}
 
 /** A clip slot, used for multi-selection in the session grid. */
 data class SlotRef(val trackId: String, val scene: Int)
@@ -87,6 +98,10 @@ data class StudioUi(
     /** Sample open in the spectral editor. */
     val editingSampleId: String? = null,
     val fxTarget: FxTarget = FxTarget(null),
+    val padMode: PadMode = PadMode.PLAY,
+    val rowLayout: RowLayout = RowLayout.FOURTHS,
+    /** Push's Accent: every pad and step plays at full velocity. */
+    val accent: Boolean = false,
 ) {
     val track: Track? get() = project?.tracks?.firstOrNull { it.id == selectedTrackId } ?: project?.tracks?.firstOrNull()
     val clip: Clip? get() = track?.clips?.get(selectedScene)
@@ -103,7 +118,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private val nm = application.app
     val engine = nm.engine
     private val repo = nm.repository
-    val exporter = ExportManager(application, repo, engine.sampleRate, engine.samples)
+    val exporter = ExportManager(application, repo, engine.sampleRate, engine.samples, engine.soundFonts)
     val mic = MicRecorder(engine.sampleRate)
     val midiDevices = nm.midi.devices
 
@@ -176,7 +191,12 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private fun open(p: Project) {
         engine.stop()
         engine.panic()
-        viewModelScope.launch(Dispatchers.IO) { repo.loadSamples(p, engine.samples) }
+        viewModelScope.launch(Dispatchers.IO) {
+            repo.loadSamples(p, engine.samples)
+            repo.loadSoundFonts(p, engine.soundFonts)
+            engine.setProject(_ui.value.project ?: p) // re-resolve presets once fonts are parsed
+            fontsVersion.value++
+        }
         undo.clear(); redo.clear()
         engine.setProject(p)
         _ui.value = StudioUi(project = p, selectedTrackId = p.tracks.firstOrNull()?.id, metronome = _ui.value.metronome, countIn = _ui.value.countIn)
@@ -329,12 +349,12 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     fun padDown(pitch: Int, velocity: Int) {
         val t = _ui.value.track ?: return
-        val vel = if (_ui.value.fixedVelocity) 100 else velocity
+        val vel = if (_ui.value.accent) 127 else if (_ui.value.fixedVelocity) 100 else velocity
         engine.noteOn(t.id, pitch, vel)
         _ui.update {
             it.copy(
                 heldPitches = it.heldPitches + pitch, lastPlayedPitch = pitch,
-                selectedPad = if (t.kind == TrackKind.DRUMS && pitch - DRUM_BASE_NOTE in 0..15) pitch - DRUM_BASE_NOTE else it.selectedPad,
+                selectedPad = if (t.drumLayout && pitch - DRUM_BASE_NOTE in 0..15) pitch - DRUM_BASE_NOTE else it.selectedPad,
             )
         }
     }
@@ -421,7 +441,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     fun nudgeClip(beats: Double) = editClip { ClipOps.nudge(it, beats) }
     fun renameClip(name: String) = editClip { it.copy(name = name) }
 
-    fun toggleStep(pitch: Int, start: Double, length: Double, velocity: Int = 100) {
+    fun toggleStep(pitch: Int, start: Double, length: Double, velocity: Int = if (_ui.value.accent) 127 else 100) {
         val s = _ui.value
         val t = s.track ?: return
         if (t.clips[s.selectedScene] == null) createClip(t.id, s.selectedScene)
@@ -469,6 +489,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             TrackKind.DRUMS -> Track(name = "Drums ${p.tracks.count { it.kind == kind } + 1}", kind = kind, color = color, drumKit = DrumKits.KIT_909)
             TrackKind.SYNTH -> Track(name = "Synth ${p.tracks.count { it.kind == kind } + 1}", kind = kind, color = color, synth = SynthPresets.PAD)
             TrackKind.SAMPLER -> Track(name = "Sampler ${p.tracks.count { it.kind == kind } + 1}", kind = kind, color = color, sampler = SamplerPatch())
+            TrackKind.SOUNDFONT -> Track(name = "SoundFont ${p.tracks.count { it.kind == kind } + 1}", kind = kind, color = color, soundfont = SoundFontPatch())
         }
         edit { it.copy(tracks = it.tracks + t) }
         selectTrack(t.id)
@@ -510,6 +531,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             TrackKind.DRUMS -> t.copy(kind = kind, drumKit = t.drumKit ?: DrumKits.KIT_808)
             TrackKind.SYNTH -> t.copy(kind = kind, synth = t.synth ?: SynthPresets.KEYS)
             TrackKind.SAMPLER -> t.copy(kind = kind, sampler = t.sampler ?: SamplerPatch())
+            TrackKind.SOUNDFONT -> t.copy(kind = kind, soundfont = t.soundfont ?: SoundFontPatch())
         }
     }
 
@@ -544,7 +566,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                             tr.copy(drumKit = kit.withPad(pad, kit.pads[pad].copy(name = name.take(12), sound = DrumSound.SAMPLE, sampleId = ref.id, tune = 0f, decay = 1f)))
                         }
                         TrackKind.SAMPLER -> tr.copy(sampler = (tr.sampler ?: SamplerPatch()).copy(sampleId = ref.id, name = name, start = 0f, end = 1f))
-                        TrackKind.SYNTH -> tr.copy(kind = TrackKind.SAMPLER, sampler = SamplerPatch(sampleId = ref.id, name = name))
+                        TrackKind.SYNTH, TrackKind.SOUNDFONT -> tr.copy(kind = TrackKind.SAMPLER, sampler = SamplerPatch(sampleId = ref.id, name = name))
                     }
                 }
             }
@@ -856,7 +878,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         return when (t.kind) {
             TrackKind.SAMPLER -> t.sampler?.sampleId
             TrackKind.DRUMS -> t.drumKit?.pads?.getOrNull(_ui.value.selectedPad)?.sampleId
-            TrackKind.SYNTH -> null
+            TrackKind.SYNTH, TrackKind.SOUNDFONT -> null
         }
     }
 
@@ -923,5 +945,110 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     fun clearPadNotes(index: Int) {
         val pitch = DRUM_BASE_NOTE + index
         editClip { c -> c.withNotes(c.notes.filter { it.pitch != pitch }) }
+    }
+
+    // ------------------------------------------------------------------ Push-style pads
+
+    fun setPadMode(m: PadMode) = _ui.update { it.copy(padMode = m) }
+    fun setRowLayout(l: RowLayout) = _ui.update { it.copy(rowLayout = l) }
+    fun toggleAccent() = _ui.update { it.copy(accent = !it.accent) }
+
+    /** Edits the note that starts on a step (velocity / length / nudge from the step's hold menu). */
+    fun editStepNotes(pitches: Set<Int>, start: Double, grid: Double, f: (Note) -> Note?) {
+        if (_ui.value.clip == null) return
+        editClip { c ->
+            c.withNotes(c.notes.mapNotNull { n -> if (n.pitch in pitches && kotlin.math.abs(n.start - start) < grid / 2) f(n) else n })
+        }
+    }
+
+    // ------------------------------------------------------------------ SoundFonts
+
+    private val _fontLibrary = MutableStateFlow<List<SoundFontRef>>(emptyList())
+    val fontLibrary: StateFlow<List<SoundFontRef>> = _fontLibrary.asStateFlow()
+    /** Bumped whenever SoundFonts finish loading, so preset lists refresh. */
+    val fontsVersion = MutableStateFlow(0)
+    private val _fontBusy = MutableStateFlow<String?>(null)
+    val fontBusy: StateFlow<String?> = _fontBusy.asStateFlow()
+
+    fun refreshFontLibrary() { viewModelScope.launch(Dispatchers.IO) { _fontLibrary.value = repo.soundFontLibrary() } }
+
+    fun presetsOf(fontId: String?): List<SoundFont.Preset> = engine.soundFonts[fontId]?.presets ?: emptyList()
+
+    /** Copies an .sf2 into the library, loads it and puts it on the selected track. */
+    fun importSoundFont(uri: Uri, displayName: String) {
+        val name = displayName.substringBeforeLast('.').ifBlank { "SoundFont" }
+        _fontBusy.value = "Loading $name…"
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val ref = getApplication<Application>().contentResolver.openInputStream(uri)?.use { repo.addSoundFont(name, it) } ?: error("Can't open file")
+                    if (!engine.soundFonts.contains(ref.id)) engine.soundFonts.put(ref.id, SoundFont.parse(repo.soundFontFile(ref).readBytes(), name))
+                    ref
+                }
+            }
+            _fontBusy.value = null
+            fontsVersion.value++
+            result.onSuccess { useSoundFont(it); refreshFontLibrary() }
+                .onFailure { toast(if (it is OutOfMemoryError) "That SoundFont is too large for memory" else "Not a valid .sf2: ${it.message}") }
+        }
+    }
+
+    /** Uses a library SoundFont on the selected track (loading it first if needed). */
+    fun useSoundFont(ref: SoundFontRef) {
+        val t = _ui.value.track ?: return
+        viewModelScope.launch {
+            if (!engine.soundFonts.contains(ref.id)) {
+                _fontBusy.value = "Loading ${ref.name}…"
+                withContext(Dispatchers.IO) { runCatching { engine.soundFonts.put(ref.id, SoundFont.parse(repo.soundFontFile(ref).readBytes(), ref.name)) } }
+                _fontBusy.value = null
+                fontsVersion.value++
+            }
+            val first = presetsOf(ref.id).firstOrNull()
+            edit { p ->
+                p.copy(soundFonts = if (p.soundFonts.any { it.id == ref.id }) p.soundFonts else p.soundFonts + ref).updateTrack(t.id) {
+                    it.copy(kind = TrackKind.SOUNDFONT, soundfont = SoundFontPatch(ref.id, ref.name, first?.bank ?: 0, first?.program ?: 0, first?.name ?: ""))
+                }
+            }
+        }
+    }
+
+    fun setSoundFontPreset(preset: SoundFont.Preset) {
+        val t = _ui.value.track ?: return
+        engine.panic()
+        edit { p -> p.updateTrack(t.id) { it.copy(soundfont = (it.soundfont ?: SoundFontPatch()).copy(bank = preset.bank, program = preset.program, presetName = preset.name)) } }
+    }
+
+    fun setSoundFontGain(g: Float) {
+        val t = _ui.value.track ?: return
+        edit(undoable = false) { p -> p.updateTrack(t.id) { it.copy(soundfont = (it.soundfont ?: SoundFontPatch()).copy(gain = g)) } }
+    }
+
+    // ------------------------------------------------------------------ audio route, latency, display
+
+    val outputRoute: String get() = nm.output.routeName
+    val bluetoothOutput: Boolean get() = nm.output.bluetooth
+    val bleMidi = nm.bleMidi
+
+    private val settings = application.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+    private val _extraLatency = MutableStateFlow(settings.getFloat("extra_latency_ms", 0f))
+    val extraLatencyMs: StateFlow<Float> = _extraLatency.asStateFlow()
+    private val _hideNavBar = MutableStateFlow(settings.getBoolean("hide_nav", false))
+    val hideNavBar: StateFlow<Boolean> = _hideNavBar.asStateFlow()
+
+    fun setExtraLatency(ms: Float) {
+        _extraLatency.value = ms
+        engine.extraLatencyMs = ms.toDouble()
+        settings.edit().putFloat("extra_latency_ms", ms).apply()
+    }
+
+    fun setHideNavBar(on: Boolean) {
+        _hideNavBar.value = on
+        settings.edit().putBoolean("hide_nav", on).apply()
+    }
+
+    init {
+        engine.extraLatencyMs = _extraLatency.value.toDouble()
+        refreshFontLibrary()
+        bleMidi.reconnectSaved()
     }
 }

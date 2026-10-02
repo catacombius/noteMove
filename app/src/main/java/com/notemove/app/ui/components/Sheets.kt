@@ -110,17 +110,22 @@ fun SettingsSheet(vm: StudioViewModel, ui: StudioUi, onDismiss: () -> Unit) {
             }
             SectionTitle("MIDI controllers")
             Text(
-                if (devices.isEmpty()) "None connected. Plug in a USB MIDI keyboard / pad controller (or Move / Push in MIDI mode) — notes play the selected track."
+                if (devices.isEmpty()) "None connected. Plug in a USB MIDI keyboard / pad controller (or Move / Push in MIDI mode), or connect a Bluetooth MIDI controller below — notes play the selected track."
                 else devices.joinToString(" · "),
                 fontSize = 12.sp, color = NM.textDim,
             )
+            BleMidiSection(vm)
             SectionTitle("Layout")
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Drag the dividers between areas to resize them; double-tap a divider to reset it.", fontSize = 12.sp, color = NM.textDim, modifier = Modifier.weight(1f))
                 Chip("Reset layout", false, vm::resetSplits)
             }
-            SectionTitle("Audio")
-            Text("Output latency ≈ ${vm.latencyMs.toInt()} ms · ${vm.engine.sampleRate} Hz", fontSize = 12.sp, color = NM.textDim)
+            val hideNav by vm.hideNavBar.collectAsState()
+            Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(hideNav, { vm.setHideNavBar(it) })
+                Text("Also hide the navigation bar (swipe from the edge to show it)", fontSize = 13.sp, color = NM.text)
+            }
+            AudioSection(vm)
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -280,4 +285,55 @@ fun TrackDialog(vm: StudioViewModel, track: Track, onDismiss: () -> Unit) {
         },
         containerColor = NM.surface,
     )
+}
+
+/** Output route and latency, with the Bluetooth caveat and a manual recording offset. */
+@Composable
+private fun AudioSection(vm: StudioViewModel) {
+    var tick by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(500); tick++ } }
+    @Suppress("UNUSED_EXPRESSION") tick
+    val extra by vm.extraLatencyMs.collectAsState()
+    SectionTitle("Audio")
+    Text("Output: ${vm.outputRoute.ifBlank { "…" }} · measured latency ≈ ${vm.latencyMs.toInt()} ms · ${vm.engine.sampleRate} Hz", fontSize = 12.sp, color = NM.text)
+    if (vm.bluetoothOutput) {
+        Text(
+            "Bluetooth headphones add a delay of roughly 150–300 ms that no app can remove — the audio is " +
+                "compressed, sent over the air and buffered in the headphones. NoteMove measures it and shifts recorded " +
+                "notes and the playhead so your takes stay in time, but pads will feel late. For playing, use the " +
+                "speaker, wired / USB-C headphones, or Galaxy Buds with LE Audio / Game mode.",
+            fontSize = 12.sp, color = NM.queued, modifier = Modifier.padding(vertical = 4.dp),
+        )
+    }
+    Text("Extra recording offset: ${extra.toInt()} ms (if recorded notes still land late or early)", fontSize = 12.sp, color = NM.textDim)
+    Slider(extra, { vm.setExtraLatency(Math.round(it / 5f) * 5f) }, valueRange = -100f..300f)
+}
+
+/** Scan for and connect Bluetooth LE MIDI controllers. */
+@Composable
+private fun BleMidiSection(vm: StudioViewModel) {
+    val ble = vm.bleMidi
+    val found by ble.devices.collectAsState()
+    val scanning by ble.scanning.collectAsState()
+    val status by ble.status.collectAsState()
+    val perms = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
+        if (res.values.all { it }) ble.scan() else vm.toast("Bluetooth permission is needed to find MIDI controllers")
+    }
+    Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton({
+            when {
+                !ble.available -> vm.toast("Bluetooth MIDI isn't supported on this device")
+                scanning -> ble.stopScan()
+                ble.hasPermissions() -> ble.scan()
+                else -> perms.launch(ble.requiredPermissions())
+            }
+        }) { Text(if (scanning) "Stop scanning" else "Find Bluetooth MIDI…") }
+        if (status.isNotBlank()) Text(status, fontSize = 12.sp, color = NM.textDim, modifier = Modifier.weight(1f))
+    }
+    for (d in found) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+            Text((if (d.connected) "● " else "○ ") + d.name, fontSize = 13.sp, color = if (d.connected) NM.play else NM.text, modifier = Modifier.weight(1f))
+            TextButton({ if (d.connected) ble.disconnect(d.address) else ble.connect(d.address) }) { Text(if (d.connected) "Disconnect" else "Connect") }
+        }
+    }
 }

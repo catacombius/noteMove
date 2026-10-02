@@ -56,7 +56,7 @@ import com.notemove.app.ui.components.SplitPane
 import com.notemove.app.ui.components.ClipEditor
 import com.notemove.app.ui.components.ExportSheet
 import com.notemove.app.ui.components.MixerPanel
-import com.notemove.app.ui.components.PadToolbar
+import com.notemove.app.ui.components.PushSurface
 import com.notemove.app.ui.components.PlaySurface
 import com.notemove.app.ui.components.SampleSheet
 import com.notemove.app.ui.components.SessionGrid
@@ -80,7 +80,19 @@ fun StudioScreen(vm: StudioViewModel, ui: StudioUi, layout: DeviceLayout) {
     LaunchedEffect(ui.message) {
         ui.message?.let { snackbar.showSnackbar(it); vm.clearMessage() }
     }
-    BackHandler { vm.closeProject() }
+    // Back closes whatever is on top first (sheets, editors, selections), and only then leaves the set.
+    BackHandler {
+        when {
+            ui.editingSampleId != null -> vm.closeSampleEditor()
+            settings -> settings = false
+            export -> { vm.resetExport(); export = false }
+            sample -> sample = false
+            editTrackId != null -> editTrackId = null
+            ui.noteSelection.isNotEmpty() -> vm.clearNoteSelection()
+            ui.clipSelection.isNotEmpty() -> vm.clearClipSelection()
+            else -> vm.closeProject()
+        }
+    }
 
     val actions = StudioActions(
         onSettings = { settings = true },
@@ -126,15 +138,7 @@ private fun CoverLayout(vm: StudioViewModel, ui: StudioUi, engine: State<EngineS
         Box(Modifier.weight(1f).fillMaxWidth().padding(8.dp)) {
             when (ui.panel) {
                 Panel.SESSION -> SessionGrid(vm, ui, engine, Modifier.fillMaxSize(), colWidth = 86.dp, onEditTrack = { a.onEditTrack(it.id) })
-                Panel.PLAY -> Column(Modifier.fillMaxSize()) {
-                    PadToolbar(vm, ui)
-                    SplitPane(
-                        splits["cover_steps"] ?: 0.8f, { vm.setSplit("cover_steps", it) }, vertical = true,
-                        modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp), default = 0.8f, minPane = 60.dp,
-                        first = { PlaySurface(vm, ui, engine, rows = 6, cols = 4, modifier = Modifier.fillMaxSize(), onSample = a.onSample) },
-                        second = { StepStrip(vm, ui, engine, Modifier.fillMaxSize(), rowsOf8 = true) },
-                    )
-                }
+                Panel.PLAY -> PushSurface(vm, ui, engine, cols = 4, modifier = Modifier.fillMaxSize(), onSample = a.onSample, splitKey = "cover_steps")
                 Panel.EDIT -> ClipEditor(vm, ui, engine, Modifier.fillMaxSize(), compact = true)
                 Panel.SOUND -> SoundPanel(vm, ui, a.onSample, Modifier.fillMaxSize())
                 Panel.FX -> EffectsPanel(vm, ui, Modifier.fillMaxSize())
@@ -216,19 +220,10 @@ private fun SidePanel(vm: StudioViewModel, ui: StudioUi, engine: State<EngineSta
     }
 }
 
-/** Move's surface: toolbar, 4×8 pads and the 16 step buttons (drag the divider to resize). */
+/** Push/Move surface: 8 columns of pads; Play or Sequence mode (drag the divider to resize). */
 @Composable
 private fun MoveSurface(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, a: StudioActions, modifier: Modifier = Modifier) {
-    val splits by vm.splits.collectAsState()
-    Column(modifier) {
-        PadToolbar(vm, ui, Modifier.padding(bottom = 6.dp))
-        SplitPane(
-            splits["move_steps"] ?: 0.82f, { vm.setSplit("move_steps", it) }, vertical = true,
-            modifier = Modifier.weight(1f).fillMaxWidth(), default = 0.82f, minPane = 40.dp,
-            first = { PlaySurface(vm, ui, engine, rows = 4, cols = 8, modifier = Modifier.fillMaxSize(), onSample = a.onSample) },
-            second = { StepStrip(vm, ui, engine, Modifier.fillMaxSize()) },
-        )
-    }
+    PushSurface(vm, ui, engine, cols = 8, modifier = modifier, onSample = a.onSample)
 }
 
 @Composable

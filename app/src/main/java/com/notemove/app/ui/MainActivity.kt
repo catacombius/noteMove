@@ -12,6 +12,9 @@ import androidx.activity.viewModels
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.notemove.app.app
 import com.notemove.app.ui.components.displayName
 import com.notemove.app.ui.screens.LibraryScreen
@@ -29,6 +32,8 @@ class MainActivity : ComponentActivity() {
             NoteMoveTheme {
                 val ui by vm.ui.collectAsState()
                 val layout = rememberDeviceLayout(this)
+                val hideNav by vm.hideNavBar.collectAsState()
+                LaunchedEffect(hideNav) { applyFullscreen() }
                 val inSet = ui.project != null
                 LaunchedEffect(inSet) {
                     if (inSet) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -37,6 +42,19 @@ class MainActivity : ComponentActivity() {
                 if (inSet) StudioScreen(vm, ui, layout) else LibraryScreen(vm, ui, layout)
             }
         }
+    }
+
+    /** Fullscreen: the status bar is always hidden (swipe down to peek); the navigation bar optionally too. */
+    private fun applyFullscreen() {
+        val c = WindowCompat.getInsetsController(window, window.decorView)
+        c.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        c.hide(WindowInsetsCompat.Type.statusBars())
+        if (vm.hideNavBar.value) c.hide(WindowInsetsCompat.Type.navigationBars()) else c.show(WindowInsetsCompat.Type.navigationBars())
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) applyFullscreen()
     }
 
     override fun onNewIntent(intent: Intent) {

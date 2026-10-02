@@ -5,7 +5,10 @@ import android.content.Context
 import android.media.AudioManager
 import com.notemove.app.audio.AudioOutput
 import com.notemove.app.data.ProjectRepository
+import com.notemove.app.midi.BleMidi
 import com.notemove.app.midi.MidiInput
+import com.notemove.core.dsp.SampleBank
+import com.notemove.core.dsp.SoundFontBank
 import com.notemove.core.engine.AudioEngine
 
 /**
@@ -21,16 +24,19 @@ class NoteMoveApp : Application() {
         private set
     lateinit var midi: MidiInput
         private set
+    lateinit var bleMidi: BleMidi
+        private set
 
     override fun onCreate() {
         super.onCreate()
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val rate = am.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)?.toIntOrNull()?.takeIf { it in 22050..96000 } ?: 48000
         val burst = am.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)?.toIntOrNull()?.takeIf { it in 32..4096 } ?: 192
-        engine = AudioEngine(rate)
+        engine = AudioEngine(rate, SampleBank(), SoundFontBank())
         output = AudioOutput(engine, rate, burst)
         repository = ProjectRepository(this)
         midi = MidiInput(this)
+        bleMidi = BleMidi(this)
     }
 }
 

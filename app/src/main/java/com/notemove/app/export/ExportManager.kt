@@ -7,6 +7,7 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import com.notemove.app.data.ProjectRepository
 import com.notemove.core.dsp.SampleBank
+import com.notemove.core.dsp.SoundFontBank
 import com.notemove.core.export.LiveSetExporter
 import com.notemove.core.export.LiveSetImporter
 import com.notemove.core.export.ProjectJson
@@ -18,7 +19,13 @@ import java.io.InputStream
 import java.util.zip.ZipInputStream
 
 /** Builds export files into the cache and hands them to the share sheet or a user-chosen location. */
-class ExportManager(private val context: Context, private val repo: ProjectRepository, private val sampleRate: Int, private val samples: SampleBank) {
+class ExportManager(
+    private val context: Context,
+    private val repo: ProjectRepository,
+    private val sampleRate: Int,
+    private val samples: SampleBank,
+    private val soundFonts: SoundFontBank,
+) {
     private val dir get() = File(context.cacheDir, "exports").apply { mkdirs() }
 
     /** Full Live project folder (.als + rendered loops + samples + MIDI), zipped. */
@@ -26,7 +33,7 @@ class ExportManager(private val context: Context, private val repo: ProjectRepos
         dir.listFiles()?.forEach { it.delete() }
         val f = File(dir, "${ProjectPackager.safeName(project.name)} Project.zip")
         f.outputStream().buffered().use { out ->
-            ProjectPackager(sampleRate, samples).write(project, { repo.sampleFile(project.id, it) }, out, options, onProgress)
+            ProjectPackager(sampleRate, samples, soundFonts).write(project, { repo.sampleFile(project.id, it) }, out, options, onProgress) { repo.soundFontFile(it) }
         }
         return f
     }
@@ -76,6 +83,7 @@ class ExportManager(private val context: Context, private val repo: ProjectRepos
         var json: String? = null
         var als: ByteArray? = null
         val wavs = HashMap<String, ByteArray>()
+        val fonts = HashMap<String, ByteArray>()
         ZipInputStream(bytes.inputStream()).use { zip ->
             while (true) {
                 val e = zip.nextEntry ?: break
@@ -84,11 +92,24 @@ class ExportManager(private val context: Context, private val repo: ProjectRepos
                     n.endsWith(".notemove") -> json = String(zip.readBytes())
                     n.endsWith(".als") && als == null -> als = zip.readBytes()
                     n.contains("Samples/Imported/") && n.endsWith(".wav") -> wavs[n.substringAfterLast('/').removeSuffix(".wav")] = zip.readBytes()
+                    n.contains("Samples/SoundFonts/") && n.endsWith(".sf2") -> fonts[n.substringAfterLast('/').removeSuffix(".sf2")] = zip.readBytes()
                 }
             }
         }
         json?.let { j ->
-            val p = ProjectJson.decode(j).copy(id = newId())
+            var p = ProjectJson.decode(j).copy(id = newId())
+            // Restore bundled SoundFonts into the library and point tracks at the stored copies.
+            val idMap = HashMap<String, com.notemove.core.model.SoundFontRef>()
+            for (ref in p.soundFonts) {
+                val data = fonts[ProjectPackager.safeName(ref.name)] ?: continue
+                idMap[ref.id] = repo.addSoundFont(ref.name, data.inputStream())
+            }
+            if (idMap.isNotEmpty()) {
+                p = p.copy(
+                    soundFonts = p.soundFonts.map { idMap[it.id] ?: it },
+                    tracks = p.tracks.map { t -> t.soundfont?.fontId?.let { idMap[it] }?.let { nr -> t.copy(soundfont = t.soundfont!!.copy(fontId = nr.id)) } ?: t },
+                )
+            }
             // Restore samples (exported under their display names).
             for (ref in p.samples) {
                 val data = wavs[ProjectPackager.safeName(ref.name)] ?: continue

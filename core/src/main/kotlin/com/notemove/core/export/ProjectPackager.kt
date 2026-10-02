@@ -43,6 +43,7 @@ class ProjectPackager(private val sampleRate: Int, private val samples: SampleBa
         out: OutputStream,
         options: Options = Options(),
         onProgress: (String, Float) -> Unit = { _, _ -> },
+        soundFontFile: (com.notemove.core.model.SoundFontRef) -> File? = { null },
     ) {
         val name = safeName(project.name)
         val root = "$name Project/"
@@ -58,6 +59,11 @@ class ProjectPackager(private val sampleRate: Int, private val samples: SampleBa
             for (ref in project.samples) {
                 val f = sampleFile(ref.fileName) ?: continue
                 if (f.exists()) put("Samples/Imported/${safeName(ref.name)}.wav", f.readBytes())
+            }
+            // SoundFonts used by the set (skipped when huge, the rendered loops carry their sound anyway).
+            for (ref in project.soundFonts) {
+                val f = soundFontFile(ref) ?: continue
+                if (f.exists() && f.length() < 96L * 1024 * 1024) put("Samples/SoundFonts/${safeName(ref.name)}.sf2", f.readBytes())
             }
             if (options.midi) {
                 onProgress("MIDI", 0.1f)

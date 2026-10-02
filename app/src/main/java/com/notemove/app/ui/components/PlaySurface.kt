@@ -84,7 +84,7 @@ fun PlaySurface(
     var holdPad by remember { mutableStateOf<Int?>(null) }
     val onHoldDrum: (PadSpec) -> Unit = { s -> (s.id - DRUM_BASE_NOTE).takeIf { it in 0..15 }?.let { vm.selectPad(it); holdPad = it } }
     Box(modifier) {
-        if (track.kind == TrackKind.DRUMS) {
+        if (track.drumLayout) {
             if (cols >= 8) {
                 Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     PadGrid(4, 4, { r, c -> PadLayouts.drumSpec(track, r * 4 + c, ui.heldPitches, sounding, ui.selectedPad) },
@@ -104,7 +104,7 @@ fun PlaySurface(
                     onDown = { s, v -> vm.padDown(s.id, v) }, onUp = { vm.padUp(it.id) }, modifier = Modifier.fillMaxSize(), onHold = onHoldDrum)
             }
         } else {
-            PadGrid(rows, cols, { r, c -> PadLayouts.melodicSpec(project, track, r, c, ui.octave, ui.inKey, ui.heldPitches, sounding) },
+            PadGrid(rows, cols, { r, c -> PadLayouts.melodicSpec(project, track, r, c, ui.octave, ui.inKey, ui.heldPitches, sounding, ui.rowLayout, cols) },
                 onDown = { s, v -> vm.padDown(s.id, v) }, onUp = { vm.padUp(it.id) }, modifier = Modifier.fillMaxSize())
         }
         // Touch & hold a drum pad for its options.
@@ -131,20 +131,31 @@ fun PadToolbar(vm: StudioViewModel, ui: StudioUi, modifier: Modifier = Modifier)
     val project = ui.project ?: return
     val track = ui.track ?: return
     var repeatMenu by remember { mutableStateOf(false) }
+    var layoutMenu by remember { mutableStateOf(false) }
     Row(
         modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (track.kind != TrackKind.DRUMS) {
+        // Push's "Layout" button: play the grid, or split it into steps + pads.
+        for (m in com.notemove.app.ui.PadMode.entries) Chip(m.label, ui.padMode == m, { vm.setPadMode(m) }, color = NM.track(track.color))
+        ToggleBox("Accent", ui.accent, vm::toggleAccent, onColor = NM.queued)
+        if (!track.drumLayout) {
+            Box {
+                Chip("Rows: ${ui.rowLayout.label}", false, { layoutMenu = true })
+                DropdownMenu(layoutMenu, { layoutMenu = false }) {
+                    for (l in com.notemove.app.ui.RowLayout.entries) DropdownMenuItem({ Text(l.label) }, { vm.setRowLayout(l); layoutMenu = false })
+                }
+            }
+        }
+        if (!track.drumLayout) {
             Chip("Oct −", false, { vm.setOctave(ui.octave - 1) })
             Text("C${ui.octave}", color = NM.text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             Chip("Oct +", false, { vm.setOctave(ui.octave + 1) })
             ToggleBox(if (ui.inKey) "In Key" else "Chromatic", ui.inKey, vm::toggleInKey)
             Text("${Scale.NOTE_NAMES[project.rootNote]} ${project.scale.label}", color = NM.textDim, fontSize = 12.sp)
         } else {
-            val pad = track.drumKit?.pads?.getOrNull(ui.selectedPad)
-            Text(pad?.name ?: "", color = NM.text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text(PadLayouts.padName(track, ui.selectedPad), color = NM.text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
         Box {
             ToggleBox(if (ui.noteRepeat > 0) "Repeat ${rateLabel(ui.noteRepeat)}" else "Repeat", ui.noteRepeat > 0, { repeatMenu = true })
@@ -172,17 +183,17 @@ fun StepStrip(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, mod
     val track = ui.track ?: return
     val clip = ui.clip
     val grid = ui.stepGrid
-    val pitch = if (track.kind == TrackKind.DRUMS) DRUM_BASE_NOTE + ui.selectedPad else ui.lastPlayedPitch
+    val pitch = if (track.drumLayout) DRUM_BASE_NOTE + ui.selectedPad else ui.lastPlayedPitch
     val pageBeats = grid * 16
     val length = clip?.lengthBeats ?: (ui.newClipBars * 4.0)
     val pages = kotlin.math.ceil(length / pageBeats).toInt().coerceAtLeast(1)
     val page = ui.stepPage.coerceIn(0, pages - 1)
     val head = playheadIn(engine.value, track, ui.selectedScene, clip)
     val color = NM.track(track.color)
-    val pitches = if (track.kind == TrackKind.DRUMS) setOf(pitch) else ui.heldPitches.ifEmpty { setOf(pitch) }
+    val pitches = if (track.drumLayout) setOf(pitch) else ui.heldPitches.ifEmpty { setOf(pitch) }
     Column(modifier) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(if (track.kind == TrackKind.DRUMS) "Steps · ${track.drumKit?.pads?.getOrNull(ui.selectedPad)?.name ?: ""}" else "Steps · ${pitches.sorted().joinToString { Scale.noteName(it) }}",
+            Text(if (track.drumLayout) "Steps · ${PadLayouts.padName(track, ui.selectedPad)}" else "Steps · ${pitches.sorted().joinToString { Scale.noteName(it) }}",
                 color = NM.textDim, fontSize = 11.sp)
             Spacer(Modifier.weight(1f))
             for (p in 0 until pages) {

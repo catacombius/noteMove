@@ -21,6 +21,8 @@ It's built for the **Samsung Galaxy Z Fold** family and works on any Android 10+
 | Sounds | Drum Rack kits, Drift, Melodic Sampler | 5 synthesised drum kits (19 drum voices); 2-oscillator synth with filter/envelopes/LFO/glide and 8 presets; chromatic sampler |
 | Sampling | mic sampling into pads / sampler | Record from the mic or import any audio file into a drum pad or sampler track; auto-trim and normalise |
 | Mixer & FX | volume, pan, sends | Volume, pan, mute/solo, meters; per-track filter and drive; shared tempo-synced delay and reverb; master limiter |
+| SoundFonts | — | Load any **.sf2** (GM banks, pianos, orchestral…): pick presets by bank/program; bank 128 drum kits use the drum pads with GM names. SoundFonts are kept in a shared library and bundled into Live exports |
+| Push-style pads | Push 2/3 | **Play** mode (8×8 in-key/chromatic grid, row layout 4ths / 3rds / sequential, accent) and **Sequence** mode (32 step pads on top, playing pads below; drums get Push's loop selector). Hold a step for velocity, length and nudge |
 | Arpeggiator | Move's arp | Up, down, up/down, as played, random, chord · 1/4–1/32 & triplets · 1–4 octaves · gate · latch; arp output is recorded |
 | Effects | Live devices | Chains of up to 6 effects per track and on the master: Auto Filter (synced LFO), Saturator, Redux, Chorus, Phaser, Compressor, EQ Three, Auto Pan, Echo, Reverb |
 | Sample editing | — | **Spectral sample editor** (iZotope Iris-style): spectrogram, rectangle / brush / time selections, attenuate · erase · boost · keep-only in the frequency domain, plus trim, delete, reverse, fades, normalise, gain, preview and undo |
@@ -28,7 +30,8 @@ It's built for the **Samsung Galaxy Z Fold** family and works on any Android 10+
 | Touch & hold | — | Options on clips, scenes, tracks, pads, notes, effects, knobs and sets; multi-select clips (copy, paste, duplicate, quantize, launch, delete), notes (move by dragging, box-select, transpose, velocity, length, legato…) and sets |
 | Undo | ✓ | Undo / redo |
 | To Live | Ableton Cloud / Move Manager | **Export a zipped Live project** or just the `.als` via the share sheet or save to a folder; **open `.als` files** from Live |
-| Controllers | — | USB / Bluetooth MIDI controllers (keyboards, pad controllers, Move or Push in MIDI mode) play the selected track |
+| Controllers | — | USB MIDI and **Bluetooth LE MIDI** controllers (scan & connect in Set settings, auto-reconnect) — keyboards, pad controllers, Move or Push in MIDI mode play the selected track |
+| Latency | — | Output latency is measured (including Bluetooth); recording and the playhead are compensated, with a manual offset. Bluetooth headphones add ~150–300 ms by nature — use the speaker or wired / USB-C for playing |
 
 ### What goes into the Live export
 

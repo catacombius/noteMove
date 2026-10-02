@@ -64,6 +64,16 @@ fun LibraryScreen(vm: StudioViewModel, ui: StudioUi, layout: DeviceLayout) {
     var creating by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(ui.message) { ui.message?.let { snackbar.showSnackbar(it); vm.clearMessage() } }
+    // Back clears a selection first; leaving the app needs a second press so it never closes by accident.
+    var lastBack by remember { mutableStateOf(0L) }
+    androidx.activity.compose.BackHandler(enabled = true) {
+        val now = System.currentTimeMillis()
+        when {
+            ui.librarySelection.isNotEmpty() -> vm.clearLibrarySelection()
+            now - lastBack < 2000 -> (context as? android.app.Activity)?.moveTaskToBack(true)
+            else -> { lastBack = now; vm.toast("Press back again to leave NoteMove") }
+        }
+    }
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) vm.importFile(uri, displayName(context, uri))
     }

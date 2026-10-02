@@ -96,7 +96,7 @@ fun ClipToolbar(vm: StudioViewModel, ui: StudioUi, modifier: Modifier = Modifier
             Chip("Quantize", false, { vm.quantizeClip(ui.stepGrid) })
             Chip("◀", false, { vm.nudgeClip(-ui.stepGrid) })
             Chip("▶", false, { vm.nudgeClip(ui.stepGrid) })
-            if (ui.track?.kind != TrackKind.DRUMS) {
+            if (ui.track?.drumLayout != true) {
                 Chip("−1", false, { vm.transposeClip(-1) })
                 Chip("+1", false, { vm.transposeClip(1) })
                 Chip("−Oct", false, { vm.transposeClip(-12) })
@@ -128,7 +128,7 @@ fun NoteSelectionBar(vm: StudioViewModel, ui: StudioUi, modifier: Modifier = Mod
         Chip("▶", false, { vm.transformNotes { n -> n.copy(start = (n.start + g) % clip.lengthBeats) } })
         Chip("▲", false, { vm.transformNotes { n -> n.copy(pitch = (n.pitch + 1).coerceAtMost(127)) } })
         Chip("▼", false, { vm.transformNotes { n -> n.copy(pitch = (n.pitch - 1).coerceAtLeast(0)) } })
-        if (ui.track?.kind != TrackKind.DRUMS) {
+        if (ui.track?.drumLayout != true) {
             Chip("+Oct", false, { vm.transformNotes { n -> n.copy(pitch = (n.pitch + 12).coerceAtMost(127)) } })
             Chip("−Oct", false, { vm.transformNotes { n -> n.copy(pitch = (n.pitch - 12).coerceAtLeast(0)) } })
         }
@@ -299,7 +299,6 @@ private fun NoteGrid(
 @Composable
 fun DrumStepGrid(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, modifier: Modifier = Modifier, cell: Dp = 30.dp) {
     val track = ui.track ?: return
-    val kit = track.drumKit
     val rows = remember { (DRUM_PAD_COUNT - 1 downTo 0).map { DRUM_BASE_NOTE + it } }
     val vScroll = rememberScrollState()
     Row(modifier) {
@@ -312,7 +311,7 @@ fun DrumStepGrid(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, 
                         .pointerInput(pad) { detectTapGestures { vm.selectPad(pad); vm.auditionPad(pad) } },
                     contentAlignment = Alignment.CenterStart,
                 ) {
-                    Text(kit?.pads?.getOrNull(pad)?.name ?: "Pad ${pad + 1}", Modifier.padding(start = 4.dp), fontSize = 11.sp,
+                    Text(PadLayouts.padName(track, pad).ifBlank { "Pad ${pad + 1}" }, Modifier.padding(start = 4.dp), fontSize = 11.sp,
                         color = if (pad == ui.selectedPad) NM.text else NM.textDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
@@ -367,7 +366,7 @@ fun ClipEditor(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, mo
     Column(modifier) {
         if (ui.noteSelection.isNotEmpty()) NoteSelectionBar(vm, ui) else ClipToolbar(vm, ui)
         Box(Modifier.weight(1f).fillMaxWidth().padding(top = 6.dp)) {
-            if (track.kind == TrackKind.DRUMS) {
+            if (track.drumLayout) {
                 BoxWithConstraints(Modifier.fillMaxSize()) {
                     val cell = ((maxHeight - 2.dp) / DRUM_PAD_COUNT).coerceIn(18.dp, if (compact) 30.dp else 40.dp)
                     DrumStepGrid(vm, ui, engine, Modifier.fillMaxSize(), cell = cell)

@@ -176,14 +176,24 @@ private fun Pad(s: PadSpec?, modifier: Modifier) {
 // ------------------------------------------------------------------------------------------
 
 object PadLayouts {
-    /** Pitch at (row, col) for an isomorphic melodic layout: rows go up a fourth, columns one step. */
-    fun melodicPitch(project: Project, row: Int, col: Int, octave: Int, inKey: Boolean): Int {
-        return if (inKey) project.scale.degreeToPitch(row * 3 + col, project.rootNote, octave)
-        else (octave + 2) * 12 + project.rootNote + row * 5 + col
+    /**
+     * Pitch at (row, col) for an isomorphic melodic layout (Push style): columns step through the scale,
+     * rows go up a 4th / 3rd, or continue sequentially from the row below.
+     */
+    fun melodicPitch(project: Project, row: Int, col: Int, octave: Int, inKey: Boolean,
+                     layout: com.notemove.app.ui.RowLayout = com.notemove.app.ui.RowLayout.FOURTHS, cols: Int = 8): Int {
+        return if (inKey) {
+            val step = if (layout.inKeySteps > 0) layout.inKeySteps else cols
+            project.scale.degreeToPitch(row * step + col, project.rootNote, octave)
+        } else {
+            val step = if (layout.semitones > 0) layout.semitones else cols
+            (octave + 2) * 12 + project.rootNote + row * step + col
+        }
     }
 
-    fun melodicSpec(project: Project, track: Track, row: Int, col: Int, octave: Int, inKey: Boolean, held: Set<Int>, playing: Set<Int>): PadSpec? {
-        val pitch = melodicPitch(project, row, col, octave, inKey)
+    fun melodicSpec(project: Project, track: Track, row: Int, col: Int, octave: Int, inKey: Boolean, held: Set<Int>, playing: Set<Int>,
+                    layout: com.notemove.app.ui.RowLayout = com.notemove.app.ui.RowLayout.FOURTHS, cols: Int = 8, selected: Int? = null): PadSpec? {
+        val pitch = melodicPitch(project, row, col, octave, inKey, layout, cols)
         if (pitch !in 0..127) return null
         val color = NM.track(track.color)
         val isRoot = Math.floorMod(pitch - project.rootNote, 12) == 0
@@ -195,20 +205,25 @@ object PadLayouts {
             lit = pitch in held || pitch in playing,
             accent = isRoot,
             dim = !inScale,
+            selected = selected == pitch,
         )
     }
 
     fun drumSpec(track: Track, pad: Int, held: Set<Int>, playing: Set<Int>, selected: Int): PadSpec {
-        val kit = track.drumKit ?: DrumKits.KIT_808
         val pitch = DRUM_BASE_NOTE + pad
         return PadSpec(
             id = pitch,
-            label = kit.pads.getOrNull(pad)?.name ?: "",
+            label = padName(track, pad),
             base = NM.track(track.color),
             lit = pitch in held || pitch in playing,
             selected = pad == selected,
         )
     }
 
-    fun isDrums(track: Track) = track.kind == TrackKind.DRUMS
+    fun isDrums(track: Track) = track.drumLayout
+
+    /** Pad label: the kit's pad name, or the General MIDI drum name for SoundFont drum kits. */
+    fun padName(track: Track, pad: Int): String =
+        if (track.kind == TrackKind.DRUMS) (track.drumKit ?: DrumKits.KIT_808).pads.getOrNull(pad)?.name ?: ""
+        else com.notemove.core.dsp.GmDrums.name(DRUM_BASE_NOTE + pad)
 }
