@@ -1,6 +1,7 @@
 package com.notemove.core.export
 
 import com.notemove.core.dsp.SampleBank
+import com.notemove.core.dsp.SoundFontBank
 import com.notemove.core.model.Project
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -27,7 +28,7 @@ object ProjectJson {
  *   <Name>.notemove                  the phone project, to re-open it in NoteMove
  * ```
  */
-class ProjectPackager(private val sampleRate: Int, private val samples: SampleBank) {
+class ProjectPackager(private val sampleRate: Int, private val samples: SampleBank, private val soundFonts: SoundFontBank = SoundFontBank()) {
 
     data class Options(
         val renderClips: Boolean = true,
@@ -65,7 +66,7 @@ class ProjectPackager(private val sampleRate: Int, private val samples: SampleBa
                     put("MIDI/Clips/${safeName(t.name)} - ${safeName(project.sceneName(scene))}.mid", MidiFileWriter.clip(project, clip, t.name, t.kind))
                 }
             }
-            val renderer = OfflineRenderer(sampleRate, samples)
+            val renderer = OfflineRenderer(sampleRate, samples, soundFonts)
             if (options.renderClips) {
                 val jobs = project.tracks.flatMap { t -> t.clips.keys.sorted().map { t to it } }
                 jobs.forEachIndexed { i, (t, scene) ->

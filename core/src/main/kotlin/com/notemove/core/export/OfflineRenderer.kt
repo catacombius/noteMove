@@ -1,12 +1,13 @@
 package com.notemove.core.export
 
 import com.notemove.core.dsp.SampleBank
+import com.notemove.core.dsp.SoundFontBank
 import com.notemove.core.engine.AudioEngine
 import com.notemove.core.model.LaunchQuantization
 import com.notemove.core.model.Project
 
 /** Renders audio faster than real time using the same engine as live playback. */
-class OfflineRenderer(private val sampleRate: Int, private val samples: SampleBank) {
+class OfflineRenderer(private val sampleRate: Int, private val samples: SampleBank, private val soundFonts: SoundFontBank = SoundFontBank()) {
 
     class Stereo(val left: FloatArray, val right: FloatArray)
 
@@ -19,7 +20,7 @@ class OfflineRenderer(private val sampleRate: Int, private val samples: SampleBa
         val clip = track.clips[scene] ?: return null
         val solo = project.copy(tracks = listOf(track.copy(mute = false, solo = false)))
         val frames = beatsToFrames(project, clip.lengthBeats)
-        val engine = AudioEngine(sampleRate, samples)
+        val engine = AudioEngine(sampleRate, samples, soundFonts)
         engine.setProject(solo)
         engine.launchClip(trackId, scene)
         renderFrames(engine, frames) // first pass, discarded
@@ -29,7 +30,7 @@ class OfflineRenderer(private val sampleRate: Int, private val samples: SampleBa
     /** Renders the used scenes in order (each [repeats] times) plus a short tail. */
     fun renderSong(project: Project, repeats: Int = 1, tailSeconds: Double = 2.0, onProgress: (Float) -> Unit = {}): Stereo {
         val scenes = project.usedScenes()
-        val engine = AudioEngine(sampleRate, samples)
+        val engine = AudioEngine(sampleRate, samples, soundFonts)
         // Scene changes are placed exactly by the renderer, so launches must not wait for the next bar.
         engine.setProject(project.copy(launchQuantization = LaunchQuantization.NONE))
         val parts = ArrayList<Stereo>()

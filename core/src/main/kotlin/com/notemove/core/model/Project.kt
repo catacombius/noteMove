@@ -28,7 +28,7 @@ data class Clip(
 }
 
 @Serializable
-enum class TrackKind(val label: String) { DRUMS("Drums"), SYNTH("Synth"), SAMPLER("Sampler") }
+enum class TrackKind(val label: String) { DRUMS("Drums"), SYNTH("Synth"), SAMPLER("Sampler"), SOUNDFONT("SoundFont") }
 
 @Serializable
 data class TrackFx(
@@ -50,6 +50,7 @@ data class Track(
     val drumKit: DrumKit? = null,
     val synth: SynthPatch? = null,
     val sampler: SamplerPatch? = null,
+    val soundfont: SoundFontPatch? = null,
     val volume: Float = 0.8f,
     val pan: Float = 0f,
     val mute: Boolean = false,
@@ -62,6 +63,9 @@ data class Track(
     val clips: Map<Int, Clip> = emptyMap(),
 ) {
     fun clipAt(scene: Int): Clip? = clips[scene]
+
+    /** Drum tracks and General MIDI percussion SoundFonts (bank 128) use the 4x4 drum pad layout. */
+    val drumLayout: Boolean get() = kind == TrackKind.DRUMS || (kind == TrackKind.SOUNDFONT && soundfont?.bank == 128)
 
     fun withClip(scene: Int, clip: Clip?): Track =
         copy(clips = if (clip == null) clips - scene else clips + (scene to clip))
@@ -76,6 +80,9 @@ data class SampleRef(
     val sampleRate: Int,
     val frames: Int,
 )
+
+@Serializable
+data class SoundFontRef(val id: String, val name: String, val fileName: String, val bytes: Long = 0)
 
 @Serializable
 data class GlobalFx(
@@ -106,6 +113,8 @@ data class Project(
     val sceneCount: Int = 8,
     val sceneNames: Map<Int, String> = emptyMap(),
     val samples: List<SampleRef> = emptyList(),
+    /** SoundFonts used by this set (files live in the app's SoundFont library). */
+    val soundFonts: List<SoundFontRef> = emptyList(),
     val masterVolume: Float = 0.85f,
     val globalFx: GlobalFx = GlobalFx(),
     /** Effects on the master bus, before the limiter. */

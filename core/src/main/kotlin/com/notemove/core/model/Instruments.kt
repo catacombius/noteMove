@@ -185,3 +185,14 @@ data class SamplerPatch(
     /** When false every note plays the sample at its original pitch (one-shot / slice style). */
     val pitched: Boolean = true,
 )
+
+/** A preset from a SoundFont (.sf2) file. */
+@Serializable
+data class SoundFontPatch(
+    val fontId: String? = null,
+    val fontName: String = "",
+    val bank: Int = 0,
+    val program: Int = 0,
+    val presetName: String = "",
+    val gain: Float = 0.8f,
+)

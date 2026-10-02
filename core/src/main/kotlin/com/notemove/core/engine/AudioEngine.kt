@@ -9,6 +9,8 @@ import com.notemove.core.dsp.PolySynth
 import com.notemove.core.dsp.Reverb
 import com.notemove.core.dsp.SampleBank
 import com.notemove.core.dsp.Sampler
+import com.notemove.core.dsp.SoundFontBank
+import com.notemove.core.dsp.SoundFontPlayer
 import com.notemove.core.dsp.StereoDelay
 import com.notemove.core.dsp.Svf
 import com.notemove.core.dsp.drive
@@ -70,7 +72,7 @@ data class EngineState(
         if (!playing) songBeat else songBeat + (nowNanos - publishedAtNanos) / 1e9 * tempo / 60.0
 }
 
-class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank()) {
+class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank(), val soundFonts: SoundFontBank = SoundFontBank()) {
     private sealed interface Cmd {
         data class NoteOn(val trackId: String, val pitch: Int, val velocity: Int) : Cmd
         data class NoteOff(val trackId: String, val pitch: Int) : Cmd
@@ -619,6 +621,7 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank()) {
                 is PolySynth -> i.patch = t.synth ?: SynthPresets.KEYS
                 is DrumMachine -> i.kit = t.drumKit ?: DrumKits.KIT_808
                 is Sampler -> i.patch = t.sampler ?: SamplerPatch()
+                is SoundFontPlayer -> t.soundfont?.let { sf -> i.fontId = sf.fontId; i.bank = sf.bank; i.program = sf.program; i.gain = sf.gain }
             }
         }
 
@@ -642,6 +645,7 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank()) {
         TrackKind.DRUMS -> DrumMachine(sr, t.drumKit ?: DrumKits.KIT_808, samples)
         TrackKind.SYNTH -> PolySynth(sr, t.synth ?: SynthPresets.KEYS)
         TrackKind.SAMPLER -> Sampler(sr, t.sampler ?: SamplerPatch(), samples)
+        TrackKind.SOUNDFONT -> t.soundfont.let { sf -> SoundFontPlayer(sr, soundFonts, sf?.fontId, sf?.bank ?: 0, sf?.program ?: 0, sf?.gain ?: 0.8f) }
     }
 
     companion object {
