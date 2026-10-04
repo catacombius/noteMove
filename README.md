@@ -76,7 +76,7 @@ The app changes its layout as the phone folds, without restarting, so audio keep
   release APKs to the workflow run as the `NoteMove-apk` artifact. The release APK is signed with the
   debug key so it installs directly; set up your own signing before you publish it.
 
-Requirements: JDK 17, Android SDK 35. The minimum supported Android version is 10 (API 29).
+Requirements: JDK 17, Android SDK 36. The minimum supported Android version is 10 (API 29).
 
 ## Project layout
 
