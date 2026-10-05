@@ -12,6 +12,6 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "NoteMove"
+rootProject.name = "SpectraSeq"
 include(":core")
 include(":app")
