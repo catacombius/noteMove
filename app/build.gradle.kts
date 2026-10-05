@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "com.notemove.app"
+    namespace = "com.spectraseq.app"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.notemove.app"
+        applicationId = "com.spectraseq.app"
         minSdk = 29
         targetSdk = 36
         versionCode = 1

@@ -1,16 +1,16 @@
-# NoteMove
+# SpectraSeq
 
 An Android sketchpad in the spirit of **Ableton Note** and **Ableton Move**: make beats and ideas on the
 phone, then open them in **Ableton Live** as a real Live Set (`.als`).
 
 It's built for the **Samsung Galaxy Z Fold** family and works on any Android 10+ phone or tablet.
 
-> NoteMove is an independent project. It isn't affiliated with or endorsed by Ableton. It doesn't use
+> SpectraSeq is an independent project. It isn't affiliated with or endorsed by Ableton. It doesn't use
 > Ableton's sounds or code; every instrument is synthesised by the app.
 
 ## Features
 
-| | Note / Move | NoteMove |
+| | Note / Move | SpectraSeq |
 |---|---|---|
 | Session View | clips × scenes, scene launch | Tracks × scenes (up to 16 × 32), launch quantization, stop buttons, duplicate / delete clips & scenes |
 | Pads | 4×4 drums, in-key melodic pads (Move: 4×8) | Multitouch 4×4 drum pads; isomorphic in-key or chromatic melodic layout; 4×8 Move layout on large screens with 16 velocity pads for the selected drum |
@@ -45,7 +45,7 @@ It's built for the **Samsung Galaxy Z Fold** family and works on any Android 10+
   Samples/Imported/…wav             samples you recorded or imported
   <Set> Mixdown.wav                 the scenes played in order
   MIDI/…mid                         plain MIDI files (whole song + every clip)
-  <Set>.notemove                    the phone project (open it again in NoteMove)
+  <Set>.spectraseq                  the phone project (open it again in SpectraSeq)
 ```
 
 Drum tracks use Drum Rack note numbers (pad 1 = C1), so any Drum Rack you drop on the track plays the
@@ -73,7 +73,7 @@ The app changes its layout as the phone folds, without restarting, so audio keep
 - **Android Studio:** open the folder, let Gradle sync, then run the `app` configuration.
 - **Command line:** `./gradlew :app:assembleDebug`. The APK is written to `app/build/outputs/apk/debug/`.
 - **CI:** every push runs `.github/workflows/android.yml`, which runs the core tests and attaches debug and
-  release APKs to the workflow run as the `NoteMove-apk` artifact. The release APK is signed with the
+  release APKs to the workflow run as the `SpectraSeq-apk` artifact. The release APK is signed with the
   debug key so it installs directly; set up your own signing before you publish it.
 
 Requirements: JDK 17, Android SDK 36. The minimum supported Android version is 10 (API 29).
