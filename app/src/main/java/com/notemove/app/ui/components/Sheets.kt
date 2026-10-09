@@ -57,6 +57,7 @@ import com.notemove.app.ui.ExportState
 import com.notemove.app.ui.StudioUi
 import com.notemove.app.ui.StudioViewModel
 import com.notemove.app.ui.theme.NM
+import com.notemove.app.midi.Fm1Link
 import com.notemove.core.export.ProjectPackager
 import com.notemove.core.model.ClipOps
 import com.notemove.core.model.LaunchQuantization
@@ -116,6 +117,7 @@ fun SettingsSheet(vm: StudioViewModel, ui: StudioUi, onDismiss: () -> Unit) {
                 fontSize = 12.sp, color = NM.textDim,
             )
             BleMidiSection(vm)
+            Fm1Section(vm)
             SectionTitle("Layout")
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Drag the dividers between areas to resize them; double-tap a divider to reset it.", fontSize = 12.sp, color = NM.textDim, modifier = Modifier.weight(1f))
@@ -355,4 +357,26 @@ private fun KeyboardMouseSection(vm: StudioViewModel) {
             Text(what, fontSize = 12.sp, color = NM.textDim)
         }
     }
+}
+
+/** An M-VAVE FM-1 running NoteSorcery: its status, NoteMove's clock to it, its song into a new set. */
+@Composable
+private fun Fm1Section(vm: StudioViewModel) {
+    val fm1 by vm.fm1.collectAsState()
+    val clock by vm.fm1Clock.collectAsState()
+    SectionTitle("FM-1 (NoteSorcery)")
+    Text(
+        when (val s = fm1) {
+            is Fm1Link.State.None -> "Not connected. Plug in an FM-1 running NoteSorcery by USB."
+            is Fm1Link.State.Found -> "${s.name}: connected (no NoteSorcery reply yet — older firmware?)"
+            is Fm1Link.State.Ready -> "${s.name}: NoteSorcery ${s.caps.firmware}, ${s.caps.tracks} tracks"
+        },
+        fontSize = 12.sp, color = NM.textDim,
+    )
+    Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        ToggleBox("Send clock to FM-1", clock, { vm.setFm1Clock(!clock) })
+        if (fm1 is Fm1Link.State.Ready) Chip("Import its song", false, vm::importFromFm1)
+    }
+    Text("With the clock on, set the FM-1 to GLO > SYSTEM > SYNC = USB: it starts, stops and keeps tempo with NoteMove.",
+        fontSize = 12.sp, color = NM.textDim)
 }
