@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import com.notemove.app.midi.Fm1Link
 import com.notemove.app.ui.components.holdClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -60,6 +61,7 @@ import java.util.Date
 @Composable
 fun LibraryScreen(vm: StudioViewModel, ui: StudioUi, layout: DeviceLayout) {
     val sets by vm.library.collectAsState()
+    val fm1 by vm.fm1.collectAsState()
     val context = LocalContext.current
     var creating by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
@@ -103,6 +105,7 @@ fun LibraryScreen(vm: StudioViewModel, ui: StudioUi, layout: DeviceLayout) {
             } else Row(Modifier.padding(vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button({ creating = true }) { Text("+ New set") }
                 OutlinedButton({ importer.launch(arrayOf("*/*")) }) { Text("Open .als / set…") }
+                if (fm1 is Fm1Link.State.Ready) OutlinedButton(vm::importFromFm1) { Text("Import from FM-1") }
             }
             if (sets.isEmpty()) {
                 Text(

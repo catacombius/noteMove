@@ -6,6 +6,7 @@ import android.media.AudioManager
 import com.notemove.app.audio.AudioOutput
 import com.notemove.app.data.ProjectRepository
 import com.notemove.app.midi.BleMidi
+import com.notemove.app.midi.Fm1Link
 import com.notemove.app.midi.MidiInput
 import com.notemove.core.dsp.SampleBank
 import com.notemove.core.dsp.SoundFontBank
@@ -26,6 +27,9 @@ class NoteMoveApp : Application() {
         private set
     lateinit var bleMidi: BleMidi
         private set
+    /** An FM-1 running NoteSorcery: its song in, NoteMove's clock out. */
+    lateinit var fm1: Fm1Link
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -37,6 +41,7 @@ class NoteMoveApp : Application() {
         repository = ProjectRepository(this)
         midi = MidiInput(this)
         bleMidi = BleMidi(this)
+        fm1 = Fm1Link(this)
     }
 }
 

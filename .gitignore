@@ -10,3 +10,4 @@ captures/
 *.apk
 *.aab
 dist/
+/.kotlin

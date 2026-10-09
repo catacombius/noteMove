@@ -56,6 +56,22 @@ The `.als` writer follows the Live 11 schema, which Live 12 also opens. The test
 set, checks that every automation id is unique, and round-trips it through the importer. The set has also
 been read by an independent `.als` parser.
 
+## M-VAVE FM-1 (NoteSorcery)
+
+An FM-1 running the [NoteSorcery](https://github.com/catacombius/NoteSorcery) firmware works with NoteMove over
+USB:
+
+- **Import from FM-1** (the library, or Settings → FM-1): NoteMove reads the FM-1's song. The working project
+  and the song sections A–D become scenes, and its eight tracks become eight tracks. The notes come out as the
+  FM-1 plays them, with swing, nudges, ties, slides and ratchets. From there, export to Ableton Live as usual.
+- **Send clock to FM-1** (Settings → FM-1): NoteMove sends Start, 24 pulses a beat and Stop, delayed by its
+  audio latency. Set the FM-1 to GLO → SYSTEM → SYNC = USB and it plays along.
+- MIDI CC 7, 10, 74 and 71 from any controller (the FM-1 too) set the selected track's volume, pan, filter
+  cutoff and resonance.
+
+The FM-1 side of this is `com.notesorcery.fm1link` in `core/`, a copy of NoteSorcery's `android/fm1link`
+(protocol: NoteSorcery's `docs/NSX_PROTOCOL.md`). The project mapping is `core/fm1/Fm1Import.kt`.
+
 ## Galaxy Z Fold layouts
 
 The app changes its layout as the phone folds, without restarting, so audio keeps playing:
@@ -88,7 +104,7 @@ Requirements: JDK 17, Android SDK 35. The minimum supported Android version is 1
   - `resources/als/`: the Live Set XML fragments. They are regenerated with `tools/make_als_templates.py`.
 - `app/` is the Android app. It contains:
   - `audio/`: low-latency `AudioTrack` output, mic recorder, audio decoder
-  - `midi/`: MIDI controller input
+  - `midi/`: MIDI controller input, and the FM-1 link (`Fm1Link.kt`: song import, clock out)
   - `data/`: project and sample storage
   - `export/`: sharing, saving and import
   - `ui/`: Compose UI and the fold-aware layout (`DeviceLayout.kt`)

@@ -10,6 +10,7 @@ import com.notemove.app.audio.MicRecorder
 import com.notemove.app.data.ProjectSummary
 import com.notemove.app.export.ExportManager
 import com.notemove.app.midi.MidiInput
+import com.notemove.core.fm1.Fm1Import
 import com.notemove.core.dsp.SampleData
 import com.notemove.core.engine.EngineState
 import com.notemove.core.export.ProjectPackager
@@ -129,6 +130,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     val exporter = ExportManager(application, repo, engine.sampleRate, engine.samples, engine.soundFonts)
     val mic = MicRecorder(engine.sampleRate)
     val midiDevices = nm.midi.devices
+    /** an FM-1 running NoteSorcery (Fm1Link) */
+    val fm1 = nm.fm1.state
+    private val _fm1Clock = MutableStateFlow(false)
+    val fm1Clock: StateFlow<Boolean> = _fm1Clock.asStateFlow()
 
     private val _ui = MutableStateFlow(StudioUi())
     val ui: StateFlow<StudioUi> = _ui.asStateFlow()
@@ -168,11 +173,25 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         nm.midi.listener = object : MidiInput.Listener {
             override fun onNoteOn(channel: Int, pitch: Int, velocity: Int) = padDown(pitch, velocity)
             override fun onNoteOff(channel: Int, pitch: Int) = padUp(pitch)
+            // the selected track's mix and filter from a controller's (or the FM-1's) knobs
+            override fun onControlChange(channel: Int, cc: Int, value: Int) {
+                val t = _ui.value.track ?: return
+                val v = value / 127f
+                when (cc) {
+                    7 -> setVolume(t.id, v)
+                    10 -> setPan(t.id, (value - 64) / 63f)
+                    74 -> setTrackFx { it.copy(filterCutoff = v) }
+                    71 -> setTrackFx { it.copy(filterResonance = v) }
+                }
+            }
         }
         nm.midi.start()
+        nm.fm1.start()
     }
 
     override fun onCleared() {
+        nm.fm1.clock.stop()
+        nm.fm1.stop()
         nm.midi.listener = null
         flushSave()
     }
@@ -231,6 +250,34 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 .onFailure { toast("Import failed: ${it.message}") }
             refreshLibrary()
         }
+    }
+
+    // ------------------------------------------------------------------ FM-1 (NoteSorcery)
+
+    /** The FM-1's song (its working project and sections A..D as scenes) as a new set, opened. */
+    fun importFromFm1() {
+        viewModelScope.launch {
+            toast("Reading the FM-1…")
+            val name = "FM-1 ${java.text.SimpleDateFormat("MMM d HH.mm", java.util.Locale.ROOT).format(java.util.Date())}"
+            val result = runCatching {
+                val song = nm.fm1.pullSong(name)
+                if (song.noteCount() == 0) error("the FM-1's song has no notes")
+                Fm1Import.toProject(song).also { withContext(Dispatchers.IO) { repo.save(it) } }
+            }
+            result.onSuccess { open(it); toast("Imported ${it.sceneNames.size} sections from the FM-1") }
+                .onFailure { toast("FM-1 import failed: ${it.message}") }
+            refreshLibrary()
+        }
+    }
+
+    /** NoteMove's clock to the FM-1 (set the FM-1 to GLO > SYSTEM > SYNC = USB): START, 24 pulses a beat, STOP. */
+    fun setFm1Clock(on: Boolean) {
+        _fm1Clock.value = on
+        if (on) nm.fm1.clock.start(
+            isPlaying = { engine.state.playing },
+            bpm = { _ui.value.project?.tempo ?: 120.0 },
+            latencyNanos = { (nm.output.latencyMs * 1_000_000).toLong() },
+        ) else nm.fm1.clock.stop()
     }
 
     // ------------------------------------------------------------------ editing core
