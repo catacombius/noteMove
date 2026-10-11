@@ -221,7 +221,20 @@ data class EffectSlot(
     val type: EffectType,
     val values: List<Float> = type.defaults(),
     val enabled: Boolean = true,
+    /** For [EffectType.RACK]: the rack's inner chain, macro mappings and modulators. Its macros are [values]. */
+    val rack: RackPreset? = null,
+    /** For [EffectType.PATCH]: the modular patch. Its exposed knobs are [values]. */
+    val patch: PatchGraph? = null,
 ) {
+    /** Knob names shown on the device (custom for racks and patches). */
+    fun paramNames(): List<String> = when {
+        rack != null -> rack.macros.map { it.name }
+        patch != null -> patch.knobNames()
+        else -> type.params.map { it.name }
+    }
+
+    val displayName: String get() = rack?.name ?: patch?.name ?: type.label
+
     fun value(i: Int): Float = values.getOrElse(i) { type.params.getOrNull(i)?.default ?: 0f }
     fun with(i: Int, v: Float) = copy(values = type.params.indices.map { if (it == i) v.coerceIn(0f, 1f) else value(it) })
 }

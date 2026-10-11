@@ -7,7 +7,10 @@ import com.spectraseq.core.dsp.SoundFont
 import com.spectraseq.core.dsp.SoundFontBank
 import com.spectraseq.core.export.ProjectJson
 import com.spectraseq.core.export.Wav
+import com.spectraseq.core.model.PatchGraph
 import com.spectraseq.core.model.Project
+import com.spectraseq.core.model.RackPreset
+import com.spectraseq.core.model.UserDevices
 import com.spectraseq.core.model.SampleRef
 import com.spectraseq.core.model.SoundFontRef
 import kotlinx.serialization.builtins.ListSerializer
@@ -93,6 +96,23 @@ class ProjectRepository(context: Context) {
             if (!f.exists()) continue
             runCatching { f.inputStream().use { Wav.readMono(it) } }.getOrNull()?.let { bank.put(ref.id, SampleData(it.mono, it.sampleRate)) }
         }
+    }
+
+    // ------------------------------------------------------------------ user effect library (racks & patches)
+
+    private val devicesFile = File(context.filesDir, "devices.json")
+
+    fun userRacks(): List<RackPreset> =
+        runCatching { ProjectJson.json.decodeFromString(UserDevices.serializer(), devicesFile.readText()).racks }.getOrDefault(emptyList())
+
+    fun userPatches(): List<PatchGraph> =
+        runCatching { ProjectJson.json.decodeFromString(UserDevices.serializer(), devicesFile.readText()).patches }.getOrDefault(emptyList())
+
+    @Synchronized
+    fun saveUserDevices(racks: List<RackPreset>, patches: List<PatchGraph>) {
+        val tmp = File(devicesFile.parentFile, "devices.json.tmp")
+        tmp.writeText(ProjectJson.json.encodeToString(UserDevices.serializer(), UserDevices(racks, patches)))
+        tmp.renameTo(devicesFile)
     }
 
     // ------------------------------------------------------------------ SoundFonts

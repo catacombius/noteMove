@@ -51,8 +51,8 @@ fun createEffect(type: EffectType, sr: Float): AudioEffect = when (type) {
     EffectType.STUTTER -> StutterFx(sr)
     EffectType.PITCH -> PitchShiftFx(sr)
     EffectType.LIMITER -> LimiterFx(sr)
-    EffectType.RACK -> PassThroughFx
-    EffectType.PATCH -> PassThroughFx
+    EffectType.RACK -> RackFx(sr)
+    EffectType.PATCH -> PatchFx(sr)
 }
 
 /** Used until a rack / patch definition is attached. */
@@ -70,7 +70,14 @@ class EffectChain(private val sr: Float) {
     fun process(slots: List<EffectSlot>, l: FloatArray, r: FloatArray, n: Int, ctx: FxContext) {
         if (slots.isEmpty()) return
         if (slots !== lastSlots) sync(slots)
-        for ((slot, fx) in order) if (slot.enabled) fx.process(l, r, n, slot.values, ctx)
+        for ((slot, fx) in order) {
+            if (!slot.enabled) continue
+            when (fx) {
+                is RackFx -> fx.preset = slot.rack
+                is PatchFx -> fx.graph = slot.patch
+            }
+            fx.process(l, r, n, slot.values, ctx)
+        }
         // Guard the rest of the mix against blow-ups from extreme settings.
         for (i in 0 until n) {
             if (!l[i].isFinite()) l[i] = 0f

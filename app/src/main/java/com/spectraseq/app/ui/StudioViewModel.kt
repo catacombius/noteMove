@@ -767,6 +767,57 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         editEffects(target) { it + EffectSlot(type = type) }
     }
 
+    /** Adds a ready-made slot (a rack or a patch from the library), always as a new instance. */
+    fun addEffectSlot(target: FxTarget, slot: EffectSlot) {
+        val p = _ui.value.project ?: return
+        if (effectsOf(p, target).size >= MAX_EFFECTS) return toast("Up to $MAX_EFFECTS effects per chain")
+        editEffects(target) { it + slot.copy(id = newId()) }
+    }
+
+    /** Replaces a slot's rack / patch definition after editing it (keeping the knob positions in step). */
+    fun updateEffectSlot(target: FxTarget, id: String, undoable: Boolean = true, f: (EffectSlot) -> EffectSlot) =
+        editEffects(target, undoable) { l -> l.map { if (it.id == id) f(it) else it } }
+
+    /** Adds a new empty rack / patch to the chain and returns its slot id (for opening the editor on it). */
+    fun createDevice(target: FxTarget, slot: EffectSlot): String? {
+        val p = _ui.value.project ?: return null
+        if (effectsOf(p, target).size >= MAX_EFFECTS) { toast("Up to $MAX_EFFECTS effects per chain"); return null }
+        val s = slot.copy(id = newId())
+        editEffects(target) { it + s }
+        return s.id
+    }
+
+    // User library of racks and patches (shared by all sets)
+    private val _userRacks = MutableStateFlow<List<com.spectraseq.core.model.RackPreset>>(emptyList())
+    val userRacks: StateFlow<List<com.spectraseq.core.model.RackPreset>> = _userRacks.asStateFlow()
+    private val _userPatches = MutableStateFlow<List<com.spectraseq.core.model.PatchGraph>>(emptyList())
+    val userPatches: StateFlow<List<com.spectraseq.core.model.PatchGraph>> = _userPatches.asStateFlow()
+
+    private fun persistDevices() {
+        val r = _userRacks.value; val pt = _userPatches.value
+        viewModelScope.launch(Dispatchers.IO) { repo.saveUserDevices(r, pt) }
+    }
+
+    fun saveRackToLibrary(rack: com.spectraseq.core.model.RackPreset) {
+        val r = if (rack.id.startsWith("factory-")) rack.copy(id = newId()) else rack
+        _userRacks.update { l -> if (l.any { it.id == r.id }) l.map { if (it.id == r.id) r else it } else l + r }
+        persistDevices(); toast("Saved \"${r.name}\" to your racks")
+    }
+
+    fun deleteRackFromLibrary(id: String) { _userRacks.update { l -> l.filter { it.id != id } }; persistDevices() }
+
+    fun savePatchToLibrary(patch: com.spectraseq.core.model.PatchGraph) {
+        val g = if (patch.id.startsWith("factory-")) patch.copy(id = newId()) else patch
+        _userPatches.update { l -> if (l.any { it.id == g.id }) l.map { if (it.id == g.id) g else it } else l + g }
+        persistDevices(); toast("Saved \"${g.name}\" to your patches")
+    }
+
+    fun deletePatchFromLibrary(id: String) { _userPatches.update { l -> l.filter { it.id != id } }; persistDevices() }
+
+    init {
+        viewModelScope.launch(Dispatchers.IO) { _userRacks.value = repo.userRacks(); _userPatches.value = repo.userPatches() }
+    }
+
     fun removeEffect(target: FxTarget, id: String) = editEffects(target) { l -> l.filter { it.id != id } }
     fun toggleEffect(target: FxTarget, id: String) = editEffects(target) { l -> l.map { if (it.id == id) it.copy(enabled = !it.enabled) else it } }
     fun setEffectValue(target: FxTarget, id: String, index: Int, v: Float) =

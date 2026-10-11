@@ -23,6 +23,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,6 +58,11 @@ private fun EffectsPanelContent(vm: StudioViewModel, ui: StudioUi, modifier: Mod
     val slots = vm.effectsOf(project, target)
     val color = target.trackId?.let { project.track(it)?.color }?.let { NM.track(it) } ?: NM.accent
     var addMenu by remember { mutableStateOf(false) }
+    // Effect creator: the slot whose rack / patch is open in its editor.
+    var editRack by remember { mutableStateOf<String?>(null) }
+    var editPatch by remember { mutableStateOf<String?>(null) }
+    val userRacks by vm.userRacks.collectAsState()
+    val userPatches by vm.userPatches.collectAsState()
     Column(modifier.verticalScroll(rememberScrollState())) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             for (t in project.tracks) Chip(t.name, target.trackId == t.id, { vm.selectTrack(t.id) }, color = NM.track(t.color))
@@ -66,23 +72,45 @@ private fun EffectsPanelContent(vm: StudioViewModel, ui: StudioUi, modifier: Mod
         if (slots.isEmpty()) {
             Text("No effects yet. Add one below — they run in order, left to right like Live's device chain.", fontSize = 12.sp, color = NM.textDim)
         }
-        slots.forEachIndexed { i, slot -> EffectCard(vm, target, slot, i, slots.size, color) }
+        slots.forEachIndexed { i, slot ->
+            EffectCard(vm, target, slot, i, slots.size, color, onEdit = {
+                if (slot.rack != null) editRack = slot.id else if (slot.patch != null) editPatch = slot.id
+            })
+        }
         Box(Modifier.padding(top = 8.dp)) {
             Chip(if (slots.size < MAX_EFFECTS) "+ Add effect" else "Chain full", false, { if (slots.size < MAX_EFFECTS) addMenu = true }, color = color)
             DropdownMenu(addMenu, { addMenu = false }) {
+                Text("CREATE", fontSize = 10.sp, color = NM.textDim, modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 2.dp))
+                DropdownMenuItem({ Text("New rack… (chain + macros + modulators)") }, {
+                    addMenu = false; vm.createDevice(target, com.spectraseq.core.model.RackPreset().toSlot())?.let { editRack = it }
+                })
+                DropdownMenuItem({ Text("New patch… (modular)") }, {
+                    addMenu = false; vm.createDevice(target, com.spectraseq.core.model.PatchGraph().toSlot())?.let { editPatch = it }
+                })
                 for ((category, types) in EffectType.BUILT_IN.groupBy { it.category }) {
                     Text(category.label.uppercase(), fontSize = 10.sp, color = NM.textDim, modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 2.dp))
                     for (type in types) DropdownMenuItem({ Text(type.label) }, { addMenu = false; vm.addEffect(target, type) })
                 }
+                if (userRacks.isNotEmpty() || userPatches.isNotEmpty()) {
+                    Text("MY DEVICES", fontSize = 10.sp, color = NM.textDim, modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 2.dp))
+                    for (r in userRacks) DropdownMenuItem({ Text("▤ ${r.name}") }, { addMenu = false; vm.addEffectSlot(target, r.toSlot()) })
+                    for (pt in userPatches) DropdownMenuItem({ Text("⌬ ${pt.name}") }, { addMenu = false; vm.addEffectSlot(target, pt.toSlot()) })
+                }
+                Text("FACTORY RACKS", fontSize = 10.sp, color = NM.textDim, modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 2.dp))
+                for (r in com.spectraseq.core.model.FactoryRacks.ALL) DropdownMenuItem({ Text("▤ ${r.name}") }, { addMenu = false; vm.addEffectSlot(target, r.toSlot()) })
+                Text("FACTORY PATCHES", fontSize = 10.sp, color = NM.textDim, modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 2.dp))
+                for (pt in com.spectraseq.core.model.FactoryPatches.ALL) DropdownMenuItem({ Text("⌬ ${pt.name}") }, { addMenu = false; vm.addEffectSlot(target, pt.toSlot()) })
             }
         }
         Spacer(Modifier.padding(12.dp))
     }
+    editRack?.let { id -> RackEditor(vm, ui, target, id) { editRack = null } }
+    editPatch?.let { id -> PatchEditor(vm, ui, target, id) { editPatch = null } }
 }
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
-private fun EffectCard(vm: StudioViewModel, target: FxTarget, slot: EffectSlot, index: Int, count: Int, color: androidx.compose.ui.graphics.Color) {
+private fun EffectCard(vm: StudioViewModel, target: FxTarget, slot: EffectSlot, index: Int, count: Int, color: androidx.compose.ui.graphics.Color, onEdit: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     Column(
         Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(10.dp)).background(NM.surface)
@@ -94,7 +122,8 @@ private fun EffectCard(vm: StudioViewModel, target: FxTarget, slot: EffectSlot, 
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 ToggleBox(if (slot.enabled) "ON" else "OFF", slot.enabled, { vm.toggleEffect(target, slot.id) }, onColor = color)
-                Text(slot.type.label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = NM.text, modifier = Modifier.weight(1f))
+                Text(slot.displayName, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = NM.text, modifier = Modifier.weight(1f))
+                if (slot.rack != null || slot.patch != null) Chip("Edit", false, onEdit, color = color)
                 if (index > 0) Chip("◀", false, { vm.moveEffect(target, slot.id, -1) })
                 if (index < count - 1) Chip("▶", false, { vm.moveEffect(target, slot.id, 1) })
                 Chip("⋯", false, { menu = true })
@@ -102,6 +131,14 @@ private fun EffectCard(vm: StudioViewModel, target: FxTarget, slot: EffectSlot, 
             DropdownMenu(menu, { menu = false }) {
                 DropdownMenuItem({ Text(if (slot.enabled) "Bypass" else "Enable") }, { menu = false; vm.toggleEffect(target, slot.id) })
                 DropdownMenuItem({ Text("Duplicate") }, { menu = false; vm.duplicateEffect(target, slot.id) })
+                slot.rack?.let { r ->
+                    DropdownMenuItem({ Text("Edit rack…") }, { menu = false; onEdit() })
+                    DropdownMenuItem({ Text("Save rack to library") }, { menu = false; vm.saveRackToLibrary(r.copy(macroValues = slot.values)) })
+                }
+                slot.patch?.let { pt ->
+                    DropdownMenuItem({ Text("Edit patch…") }, { menu = false; onEdit() })
+                    DropdownMenuItem({ Text("Save patch to library") }, { menu = false; vm.savePatchToLibrary(pt.copy(knobValues = slot.values)) })
+                }
                 DropdownMenuItem({ Text("Reset knobs") }, { menu = false; vm.resetEffect(target, slot.id) })
                 if (index > 0) DropdownMenuItem({ Text("Move earlier") }, { menu = false; vm.moveEffect(target, slot.id, -1) })
                 if (index < count - 1) DropdownMenuItem({ Text("Move later") }, { menu = false; vm.moveEffect(target, slot.id, 1) })
@@ -110,8 +147,9 @@ private fun EffectCard(vm: StudioViewModel, target: FxTarget, slot: EffectSlot, 
             }
         }
         FlowRow(Modifier.alpha(if (slot.enabled) 1f else 0.5f), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            val names = slot.paramNames()
             slot.type.params.forEachIndexed { pi, spec ->
-                Knob(spec.name, slot.value(pi), { vm.setEffectValue(target, slot.id, pi, it) }, color = color, default = spec.default, size = 46.dp, display = spec.format)
+                Knob(names.getOrElse(pi) { spec.name }, slot.value(pi), { vm.setEffectValue(target, slot.id, pi, it) }, color = color, default = spec.default, size = 46.dp, display = spec.format)
             }
         }
     }
