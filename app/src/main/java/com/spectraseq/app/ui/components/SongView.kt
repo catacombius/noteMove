@@ -66,7 +66,7 @@ import com.spectraseq.app.ui.StudioUi
 import com.spectraseq.app.ui.StudioViewModel
 import com.spectraseq.app.ui.theme.NM
 import com.spectraseq.core.engine.EngineState
-import com.spectraseq.core.model.Arrangement
+import com.spectraseq.core.model.Arrangement as SongArrangement
 import com.spectraseq.core.model.ArrangementOps
 import com.spectraseq.core.model.SongClip
 import kotlinx.coroutines.delay
@@ -136,7 +136,7 @@ fun SongView(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, modi
 }
 
 @Composable
-private fun SongToolbar(vm: StudioViewModel, ui: StudioUi, arr: Arrangement, songPlaying: Boolean, hasOverrides: Boolean) {
+private fun SongToolbar(vm: StudioViewModel, ui: StudioUi, arr: SongArrangement, songPlaying: Boolean, hasOverrides: Boolean) {
     val sel = ui.songSelection
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
         Chip(if (songPlaying) "■ Stop" else "▶ Play song", songPlaying, vm::toggleSongPlay, color = NM.play)

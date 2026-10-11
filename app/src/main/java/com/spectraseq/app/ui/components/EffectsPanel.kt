@@ -70,7 +70,10 @@ private fun EffectsPanelContent(vm: StudioViewModel, ui: StudioUi, modifier: Mod
         Box(Modifier.padding(top = 8.dp)) {
             Chip(if (slots.size < MAX_EFFECTS) "+ Add effect" else "Chain full", false, { if (slots.size < MAX_EFFECTS) addMenu = true }, color = color)
             DropdownMenu(addMenu, { addMenu = false }) {
-                for (type in EffectType.entries) DropdownMenuItem({ Text(type.label) }, { addMenu = false; vm.addEffect(target, type) })
+                for ((category, types) in EffectType.BUILT_IN.groupBy { it.category }) {
+                    Text(category.label.uppercase(), fontSize = 10.sp, color = NM.textDim, modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 2.dp))
+                    for (type in types) DropdownMenuItem({ Text(type.label) }, { addMenu = false; vm.addEffect(target, type) })
+                }
             }
         }
         Spacer(Modifier.padding(12.dp))
