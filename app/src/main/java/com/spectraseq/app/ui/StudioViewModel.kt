@@ -18,7 +18,9 @@ import com.spectraseq.core.model.BEATS_PER_BAR
 import com.spectraseq.core.model.EffectSlot
 import com.spectraseq.core.model.EffectType
 import com.spectraseq.core.model.MAX_EFFECTS
+import com.spectraseq.core.model.ArrangementOps
 import com.spectraseq.core.model.Clip
+import com.spectraseq.core.model.SongClip
 import com.spectraseq.core.model.ClipOps
 import com.spectraseq.core.model.DRUM_BASE_NOTE
 import com.spectraseq.core.model.DrumKit
@@ -51,7 +53,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /** The views the editor area can show (bottom tabs on the outer screen, side tabs on the inner screen). */
-enum class Panel(val label: String) { SESSION("Session"), PLAY("Play"), EDIT("Edit"), SOUND("Sound"), FX("FX"), MIX("Mix") }
+enum class Panel(val label: String) { SESSION("Session"), SONG("Song"), PLAY("Play"), EDIT("Edit"), SOUND("Sound"), FX("FX"), MIX("Mix") }
 
 /** Push-style pad modes: play the full grid, or split it into step sequencer (top) and pads (bottom). */
 enum class PadMode(val label: String) { PLAY("Play"), SEQUENCE("Sequence") }
@@ -110,9 +112,18 @@ data class StudioUi(
     val rowLayout: RowLayout = RowLayout.FOURTHS,
     /** Push's Accent: every pad and step plays at full velocity. */
     val accent: Boolean = false,
+    /** A song clip whose notes are open in the editor (instead of the session clip). */
+    val editingSongClipId: String? = null,
+    /** Selected clips on the song timeline. */
+    val songSelection: Set<String> = emptySet(),
+    /** Song position where playback starts and Split cuts, in beats. */
+    val songCursor: Double = 0.0,
+    /** Session clip launches are being recorded into the song. */
+    val songRecordArmed: Boolean = false,
 ) {
     val track: Track? get() = project?.tracks?.firstOrNull { it.id == selectedTrackId } ?: project?.tracks?.firstOrNull()
-    val clip: Clip? get() = track?.clips?.get(selectedScene)
+    val editingSongClip: SongClip? get() = editingSongClipId?.let { id -> project?.arrangement?.clips?.firstOrNull { it.id == id } }
+    val clip: Clip? get() = editingSongClip?.clip ?: track?.clips?.get(selectedScene)
 }
 
 sealed interface ExportState {
@@ -152,6 +163,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             while (isActive) {
                 delay(40)
+                val songEvents = engine.drainSongEvents()
+                if (songEvents.isNotEmpty()) {
+                    edit(undoable = false) { p -> p.copy(arrangement = ArrangementOps.fromRecording(p.arrangement, p, songEvents)) }
+                }
                 val rec = engine.drainRecorded()
                 if (rec.isEmpty()) continue
                 val q = _ui.value.recordQuantize
@@ -321,6 +336,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     fun editClip(undoable: Boolean = true, f: (Clip) -> Clip) {
         val s = _ui.value
+        s.editingSongClip?.let { sc ->
+            edit(undoable) { p -> p.copy(arrangement = p.arrangement.copy(clips = p.arrangement.clips.map { if (it.id == sc.id) it.copy(clip = f(it.clip)) else it })) }
+            return
+        }
         val t = s.track ?: return
         val clip = t.clips[s.selectedScene] ?: return
         edit(undoable) { p -> p.updateTrack(t.id) { it.withClip(s.selectedScene, f(clip)) } }
@@ -336,11 +355,11 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         if (prev != null && prev != id) {
             _ui.value.heldPitches.forEach { engine.noteOff(prev, it) }
         }
-        _ui.update { it.copy(selectedTrackId = id, heldPitches = emptySet(), stepPage = 0, noteSelection = emptySet(), fxTarget = FxTarget(id)) }
+        _ui.update { it.copy(selectedTrackId = id, heldPitches = emptySet(), stepPage = 0, noteSelection = emptySet(), fxTarget = FxTarget(id), editingSongClipId = null) }
         if (_ui.value.noteRepeat > 0) engine.setNoteRepeat(id, _ui.value.noteRepeat)
     }
 
-    fun selectScene(scene: Int) = _ui.update { it.copy(selectedScene = scene, stepPage = 0, noteSelection = emptySet()) }
+    fun selectScene(scene: Int) = _ui.update { it.copy(selectedScene = scene, stepPage = 0, noteSelection = emptySet(), editingSongClipId = null) }
     fun selectPad(pad: Int) = _ui.update { it.copy(selectedPad = pad) }
     fun setPanel(p: Panel) = _ui.update { it.copy(panel = p) }
     fun setOctave(o: Int) = _ui.update { it.copy(octave = o.coerceIn(-1, 7)) }
@@ -685,6 +704,17 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun exportAudio(options: com.spectraseq.app.export.AudioExportOptions) {
+        val p = _ui.value.project ?: return
+        flushSave()
+        _export.value = ExportState.Working("Rendering", 0f)
+        viewModelScope.launch(Dispatchers.Default) {
+            runCatching { exporter.buildAudio(p, options) { step, pr -> _export.value = ExportState.Working(step, pr) } }
+                .onSuccess { (f, mime) -> _export.value = ExportState.Ready(f, mime) }
+                .onFailure { _export.value = ExportState.Failed(if (it is OutOfMemoryError) "Not enough memory — try a shorter song or AAC" else it.message ?: it.toString()) }
+        }
+    }
+
     fun saveExportTo(uri: Uri) {
         val s = _export.value as? ExportState.Ready ?: return
         viewModelScope.launch(Dispatchers.IO) {
@@ -962,6 +992,105 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     /** Saves edited audio as a new sample and assigns it to the current pad / sampler. */
     fun saveSampleAsNew(name: String, data: FloatArray) = assignSample(name, data)
 
+    // ------------------------------------------------------------------ song (arrangement)
+
+    private fun editSong(undoable: Boolean = true, f: (com.spectraseq.core.model.Arrangement) -> com.spectraseq.core.model.Arrangement) =
+        edit(undoable) { p -> p.copy(arrangement = f(p.arrangement)) }
+
+    fun setSongCursor(beat: Double) = _ui.update { it.copy(songCursor = beat.coerceAtLeast(0.0)) }
+
+    /** Play / stop the song from the cursor. */
+    fun toggleSongPlay() {
+        if (engine.state.playing) engine.stop() else engine.playSong(_ui.value.songCursor)
+    }
+
+    fun toggleSongRecord() {
+        val on = !_ui.value.songRecordArmed
+        if (on) checkpoint() // the whole take is one undo step
+        engine.setSongRecord(on)
+        _ui.update { it.copy(songRecordArmed = on) }
+        toast(if (on) "Recording to song: launch clips and scenes, they're written to the timeline" else "Song recording off")
+    }
+
+    fun backToSong() = engine.backToSong()
+
+    fun selectSongClip(id: String, additive: Boolean) = _ui.update {
+        it.copy(songSelection = if (additive) (if (id in it.songSelection) it.songSelection - id else it.songSelection + id) else setOf(id))
+    }
+
+    fun setSongSelection(ids: Set<String>) = _ui.update { it.copy(songSelection = ids) }
+    fun clearSongSelection() = _ui.update { it.copy(songSelection = emptySet()) }
+
+    /** Moves the selection by [deltaBeats] and [deltaTracks] lanes (one undo step per gesture via [checkpoint]). */
+    fun moveSongClips(ids: Set<String>, origin: com.spectraseq.core.model.Arrangement, deltaBeats: Double, deltaTracks: Int) {
+        val tracks = _ui.value.project?.tracks ?: return
+        editSong(undoable = false) { _ ->
+            ArrangementOps.move(origin, ids, deltaBeats) { c ->
+                val i = tracks.indexOfFirst { it.id == c.trackId }
+                tracks.getOrNull((i + deltaTracks).coerceIn(0, tracks.lastIndex))?.id ?: c.trackId
+            }
+        }
+    }
+
+    fun resizeSongClips(ids: Set<String>, origin: com.spectraseq.core.model.Arrangement, deltaBeats: Double, right: Boolean) =
+        editSong(undoable = false) { ArrangementOps.resize(origin, ids, deltaBeats, right) }
+
+    fun splitSongAtCursor() {
+        val s = _ui.value
+        val at = s.songCursor
+        val targets = s.project?.arrangement?.clips?.filter { (s.songSelection.isEmpty() || it.id in s.songSelection) && at > it.start && at < it.end } ?: return
+        if (targets.isEmpty()) return toast("Put the cursor inside a clip to split it")
+        editSong { a -> targets.fold(a) { acc, c -> ArrangementOps.split(acc, c.id, at) } }
+    }
+
+    fun duplicateSongSelection() {
+        val sel = _ui.value.songSelection
+        if (sel.isEmpty()) return
+        var newIds: Set<String> = emptySet()
+        editSong { a -> ArrangementOps.duplicate(a, sel).also { newIds = it.second }.first }
+        _ui.update { it.copy(songSelection = newIds) }
+    }
+
+    fun deleteSongSelection() {
+        val sel = _ui.value.songSelection
+        if (sel.isEmpty()) return
+        editSong { ArrangementOps.delete(it, sel) }
+        _ui.update { it.copy(songSelection = emptySet()) }
+    }
+
+    fun setSongLoop(start: Double, end: Double) = editSong(undoable = false) { ArrangementOps.setLoop(it, start, end, on = true) }
+    fun toggleSongLoop() = editSong { it.copy(loop = !it.loop) }
+
+    /** Lays the used scenes out one after another at the end of the song (a quick way to start a song). */
+    fun scenesToSong() {
+        val p = _ui.value.project ?: return
+        val scenes = p.usedScenes()
+        if (scenes.isEmpty()) return toast("Make some clips first")
+        editSong { a ->
+            var at = a.length
+            var out = a
+            for (sc in scenes) {
+                val len = p.sceneLength(sc)
+                for (t in p.tracks) {
+                    val clip = t.clips[sc] ?: continue
+                    out = ArrangementOps.place(out, SongClip(trackId = t.id, start = at, length = len, clip = clip.copy(id = newId())))
+                }
+                at += len
+            }
+            out
+        }
+        toast("Added ${scenes.size} scenes to the song")
+    }
+
+    /** Opens a song clip's own notes in the piano roll / step grid. */
+    fun editSongClip(id: String) {
+        val sc = _ui.value.project?.arrangement?.clips?.firstOrNull { it.id == id } ?: return
+        selectTrack(sc.trackId)
+        _ui.update { it.copy(editingSongClipId = id, panel = Panel.EDIT, noteSelection = emptySet()) }
+    }
+
+    fun exitSongClipEditing() = _ui.update { it.copy(editingSongClipId = null, panel = Panel.SONG) }
+
     // ------------------------------------------------------------------ slicing
 
     fun openSlicer(sampleId: String? = currentSampleId()) {
@@ -1022,7 +1151,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         val s = _ui.value
         val t = s.track ?: return
         val needLen = kotlin.math.ceil((start + grid - 1e-9) / pageBeats) * pageBeats
-        val clip = t.clips[s.selectedScene]
+        val clip = s.clip
         if (clip == null) {
             createClip(t.id, s.selectedScene)
             val made = _ui.value.clip

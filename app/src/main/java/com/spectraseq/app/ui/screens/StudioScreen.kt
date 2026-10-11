@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.ViewTimeline
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -63,6 +64,7 @@ import com.spectraseq.app.ui.components.SampleSheet
 import com.spectraseq.app.ui.components.SliceEditor
 import com.spectraseq.app.ui.components.SessionGrid
 import com.spectraseq.app.ui.components.SettingsSheet
+import com.spectraseq.app.ui.components.SongView
 import com.spectraseq.app.ui.components.SoundPanel
 import com.spectraseq.app.ui.components.StepStrip
 import com.spectraseq.app.ui.components.TrackDialog
@@ -103,6 +105,8 @@ fun StudioScreen(vm: StudioViewModel, ui: StudioUi, layout: DeviceLayout) {
             sample -> sample = false
             editTrackId != null -> editTrackId = null
             ui.noteSelection.isNotEmpty() -> vm.clearNoteSelection()
+            ui.editingSongClipId != null -> vm.exitSongClipEditing()
+            ui.songSelection.isNotEmpty() -> vm.clearSongSelection()
             ui.clipSelection.isNotEmpty() -> vm.clearClipSelection()
             else -> vm.closeProject()
         }
@@ -153,6 +157,7 @@ private fun CoverLayout(vm: StudioViewModel, ui: StudioUi, engine: State<EngineS
         Box(Modifier.weight(1f).fillMaxWidth().padding(8.dp)) {
             when (ui.panel) {
                 Panel.SESSION -> SessionGrid(vm, ui, engine, Modifier.fillMaxSize(), colWidth = 86.dp, onEditTrack = { a.onEditTrack(it.id) })
+                Panel.SONG -> SongView(vm, ui, engine, Modifier.fillMaxSize())
                 Panel.PLAY -> PushSurface(vm, ui, engine, cols = 4, modifier = Modifier.fillMaxSize(), onSample = a.onSample, splitKey = "cover_steps")
                 Panel.EDIT -> ClipEditor(vm, ui, engine, Modifier.fillMaxSize(), compact = true)
                 Panel.SOUND -> SoundPanel(vm, ui, a.onSample, Modifier.fillMaxSize())
@@ -176,6 +181,7 @@ private fun CoverLayout(vm: StudioViewModel, ui: StudioUi, engine: State<EngineS
 
 private fun iconFor(p: Panel): ImageVector = when (p) {
     Panel.SESSION -> Icons.Filled.Apps
+    Panel.SONG -> Icons.Filled.ViewTimeline
     Panel.PLAY -> Icons.Filled.GridOn
     Panel.EDIT -> Icons.Filled.Edit
     Panel.SOUND -> Icons.Filled.GraphicEq
@@ -202,7 +208,7 @@ private fun TrackStrip(vm: StudioViewModel, ui: StudioUi, a: StudioActions) {
 // Inner screen: editor pane + Move-style pad surface.
 // ----------------------------------------------------------------------------------------------
 
-private val sidePanels = listOf(Panel.SESSION, Panel.EDIT, Panel.SOUND, Panel.FX, Panel.MIX)
+private val sidePanels = listOf(Panel.SESSION, Panel.SONG, Panel.EDIT, Panel.SOUND, Panel.FX, Panel.MIX)
 
 @Composable
 private fun PanelTabs(vm: StudioViewModel, ui: StudioUi, modifier: Modifier = Modifier) {
@@ -226,6 +232,7 @@ private fun SidePanel(vm: StudioViewModel, ui: StudioUi, engine: State<EngineSta
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (if (ui.panel == Panel.PLAY) Panel.SESSION else ui.panel) {
                 Panel.SESSION, Panel.PLAY -> SessionGrid(vm, ui, engine, Modifier.fillMaxSize(), onEditTrack = { a.onEditTrack(it.id) })
+                Panel.SONG -> SongView(vm, ui, engine, Modifier.fillMaxSize())
                 Panel.EDIT -> ClipEditor(vm, ui, engine, Modifier.fillMaxSize())
                 Panel.SOUND -> SoundPanel(vm, ui, a.onSample, Modifier.fillMaxSize())
                 Panel.FX -> EffectsPanel(vm, ui, Modifier.fillMaxSize())

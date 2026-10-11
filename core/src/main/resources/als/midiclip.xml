@@ -6,7 +6,7 @@
 	<Loop>
 		<LoopStart Value="0"/>
 		<LoopEnd Value="{{LENGTH}}"/>
-		<StartRelative Value="0"/>
+		<StartRelative Value="{{START_RELATIVE}}"/>
 		<LoopOn Value="{{LOOP_ON}}"/>
 		<OutMarker Value="{{LENGTH}}"/>
 		<HiddenLoopStart Value="0"/>

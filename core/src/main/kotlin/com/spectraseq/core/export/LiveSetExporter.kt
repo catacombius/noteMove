@@ -105,7 +105,13 @@ class LiveSetExporter(private val templates: Templates = Templates.fromResources
                 .append("\t\t\t\t\t\t\t\t<NeedRefreeze Value=\"true\"/>\n\t\t\t\t\t\t\t</ClipSlot>\n")
         }
         val arrangement = StringBuilder()
-        if (options.arrangement) {
+        if (!project.arrangement.isEmpty) {
+            // The song recorded / arranged in the app.
+            var clipId = 0
+            for (sc in project.arrangement.clipsOn(track.id)) {
+                arrangement.append(clipXml(project, sc.clip, color, clipId++, sc.start, sc.length, false, sc.clip.name, sc.offset)).append('\n')
+            }
+        } else if (options.arrangement) {
             var clipId = 0
             for ((scene, span) in sceneTimes) {
                 val clip = track.clips[scene] ?: continue
@@ -130,7 +136,7 @@ class LiveSetExporter(private val templates: Templates = Templates.fromResources
      * A MIDI clip. Session clips loop over their own length; arrangement clips span [length] beats
      * starting at [time] and loop the clip content inside that span.
      */
-    private fun clipXml(project: Project, clip: Clip, color: Int, id: Int, time: Double, length: Double, session: Boolean, name: String): String {
+    private fun clipXml(project: Project, clip: Clip, color: Int, id: Int, time: Double, length: Double, session: Boolean, name: String, offset: Double = 0.0): String {
         val keyTracks = StringBuilder()
         var noteId = 1
         clip.notes.groupBy { it.pitch }.toSortedMap().entries.forEachIndexed { i, (pitch, notes) ->
@@ -152,6 +158,7 @@ class LiveSetExporter(private val templates: Templates = Templates.fromResources
             .replace("{{CURRENT_START}}", num(start))
             .replace("{{CURRENT_END}}", num(end))
             .replace("{{LENGTH}}", num(clip.lengthBeats))
+            .replace("{{START_RELATIVE}}", num(offset))
             .replace("{{LOOP_ON}}", "true")
             .replace("{{NAME}}", xmlEscape(name))
             .replace("{{COLOR}}", color.toString())

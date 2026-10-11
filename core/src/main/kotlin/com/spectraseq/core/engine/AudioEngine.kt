@@ -46,6 +46,12 @@ data class RecordedNote(
 /** A note played live, timed on the engine's free-running beat clock (used by Capture). */
 data class PlayedNote(val trackId: String, val pitch: Int, val startBeat: Double, val duration: Double, val velocity: Int, val transportBeat: Double?)
 
+/**
+ * A stretch of song recording: [scene]'s clip played on [trackId] from [start] to [end] (song beats),
+ * entering the clip at [offset] beats. The UI turns these into song clips when recording stops.
+ */
+data class SongEvent(val trackId: String, val scene: Int, val start: Double, val end: Double, val offset: Double)
+
 /** Immutable snapshot of what the audio thread is doing, published for the UI. */
 data class EngineState(
     val playing: Boolean = false,
@@ -60,6 +66,12 @@ data class EngineState(
     val tempo: Double = 120.0,
     /** Time between rendering audio and hearing it (incl. Bluetooth); visuals are delayed by this much. */
     val outputLatencyMs: Double = 0.0,
+    /** Playing the song timeline (tracks without a launched session clip follow the song). */
+    val songMode: Boolean = false,
+    /** Session clips launched now are being recorded into the song. */
+    val songRecording: Boolean = false,
+    /** Tracks playing a session clip instead of the song ("Back to song" returns them). */
+    val songOverrides: Set<String> = emptySet(),
 ) {
     /** Position inside the clip currently playing on [trackId], or null. */
     fun clipPosition(trackId: String, clip: Clip?, nowNanos: Long = System.nanoTime()): Double? {
@@ -88,11 +100,15 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank(), v
         data object StopRecording : Cmd
         data class Repeat(val trackId: String?, val rateBeats: Double) : Cmd
         data object Panic : Cmd
+        data class PlaySong(val fromBeat: Double) : Cmd
+        data object BackToSong : Cmd
+        data class SongRecord(val on: Boolean) : Cmd
     }
 
     private val sr = sampleRate.toFloat()
     private val commands = ConcurrentLinkedQueue<Cmd>()
     private val recorded = ConcurrentLinkedQueue<RecordedNote>()
+    private val songEvents = ConcurrentLinkedQueue<SongEvent>()
     private val playedRing = ArrayDeque<PlayedNote>()
     private val playedLock = Any()
 
@@ -120,6 +136,11 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank(), v
     private var repeatTrackId: String? = null
     private var repeatRate = 0.0
     private var lastPublish = 0L
+    private var songMode = false
+    private var songRecording = false
+    /** Open song-recording segment per track (audio thread). */
+    private class Segment(val scene: Int, val start: Double, val offset: Double)
+    private val segments = HashMap<String, Segment>()
 
     // Buffers
     private val block = 32
@@ -158,6 +179,18 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank(), v
     fun stop() = commands.add(Cmd.Stop)
     fun launchClip(trackId: String, scene: Int) = commands.add(Cmd.Launch(trackId, scene))
     fun stopTrack(trackId: String) = commands.add(Cmd.StopTrack(trackId))
+    /** Plays the song timeline from [fromBeat]; session clips launched meanwhile override their track. */
+    fun playSong(fromBeat: Double = 0.0) = commands.add(Cmd.PlaySong(fromBeat.coerceAtLeast(0.0)))
+    /** Returns every track to the song (stops session clips that override it). */
+    fun backToSong() = commands.add(Cmd.BackToSong)
+    /** Records session clip launches into the song while the transport runs. */
+    fun setSongRecord(on: Boolean) = commands.add(Cmd.SongRecord(on))
+
+    fun drainSongEvents(): List<SongEvent> {
+        val out = ArrayList<SongEvent>()
+        while (true) out.add(songEvents.poll() ?: break)
+        return out
+    }
     fun launchScene(scene: Int) = commands.add(Cmd.LaunchScene(scene))
     fun record(trackId: String, scene: Int, countIn: Boolean) = commands.add(Cmd.Record(trackId, scene, countIn))
     fun stopRecording() = commands.add(Cmd.StopRecording)
@@ -279,6 +312,11 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank(), v
         if (playing) {
             songBeat = b1
             if (countingIn && songBeat >= 0) countingIn = false
+            val arr = p.arrangement
+            if (songMode && arr.loop && !songRecording && arr.loopEnd > arr.loopStart && songBeat >= arr.loopEnd) {
+                songBeat = arr.loopStart + (songBeat - arr.loopEnd)
+                for (pl in players.values) if (pl.playingScene < 0) pl.flushSequencedNotes()
+            }
         }
         freeBeat += n * bpf
     }
@@ -335,6 +373,29 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank(), v
                     players[c.trackId]?.repeatStart = if (playing) b0 else freeBeat
                 }
                 Cmd.Panic -> players.values.forEach { it.instrument.allNotesOff(hard = true); it.pending.clear(); it.arpReset() }
+                is Cmd.PlaySong -> {
+                    if (playing) stopTransport()
+                    for (pl in players.values) { pl.playingScene = NONE; pl.queuedScene = NONE; pl.flushSequencedNotes() }
+                    startTransport(p, null, false)
+                    songMode = true
+                    songBeat = c.fromBeat
+                    if (songRecording) for ((id, pl) in players) openSegment(id, pl, songBeat)
+                }
+                Cmd.BackToSong -> for ((id, pl) in players) {
+                    if (pl.playingScene >= 0 || pl.queuedScene != NONE) {
+                        closeSegment(id, b0)
+                        pl.flushSequencedNotes(); pl.playingScene = NONE; pl.queuedScene = NONE
+                    }
+                }
+                is Cmd.SongRecord -> {
+                    if (c.on && !songRecording) {
+                        songRecording = true
+                        if (playing) for ((id, pl) in players) openSegment(id, pl, max(0.0, b0))
+                    } else if (!c.on && songRecording) {
+                        for (id in segments.keys.toList()) closeSegment(id, b0)
+                        songRecording = false
+                    }
+                }
             }
         }
     }
@@ -368,10 +429,27 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank(), v
             pl.clipStart = 0.0
             pl.lastLocal = -1.0
         }
+        if (songRecording) for ((id, pl) in players) openSegment(id, pl, 0.0)
+    }
+
+    /** Starts a song-recording segment for whatever [pl] is playing at [beat]. */
+    private fun openSegment(trackId: String, pl: TrackPlayer, beat: Double) {
+        segments.remove(trackId)
+        if (pl.playingScene < 0) return
+        val len = project?.track(trackId)?.clips?.get(pl.playingScene)?.lengthBeats ?: return
+        val off = ((beat - pl.clipStart) % len + len) % len
+        segments[trackId] = Segment(pl.playingScene, beat, off)
+    }
+
+    private fun closeSegment(trackId: String, beat: Double) {
+        val seg = segments.remove(trackId) ?: return
+        if (beat > seg.start + 1e-6) songEvents.add(SongEvent(trackId, seg.scene, seg.start, beat, seg.offset))
     }
 
     private fun stopTransport() {
         if (recordTrackId != null) stopRecording(songBeat)
+        for (id in segments.keys.toList()) closeSegment(id, songBeat)
+        songMode = false
         playing = false
         countingIn = false
         players.values.forEach { it.arpFlush(); it.arpOrigin = freeBeat }
@@ -423,9 +501,11 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank(), v
                 val boundary = if (quant <= 0.0) b0 else max(0.0, ceil(b0 / quant - 1e-9) * quant)
                 if (boundary < b1) {
                     pl.flushSequencedNotes()
+                    if (songRecording) closeSegment(t.id, boundary)
                     if (pl.queuedScene == STOP) pl.playingScene = NONE
                     else { pl.playingScene = pl.queuedScene; pl.clipStart = boundary; pl.lastLocal = -1.0 }
                     pl.queuedScene = NONE
+                    if (songRecording) openSegment(t.id, pl, boundary)
                 }
             }
             // Pending note-offs
@@ -437,6 +517,10 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank(), v
                 }
             }
             if (b1 <= 0.0) continue
+            if (pl.playingScene < 0) {
+                if (songMode) fireSong(p, t, pl, b0, b1)
+                continue
+            }
             val clip = t.clips[pl.playingScene] ?: continue
             if (clip.notes.isEmpty() || b1 <= pl.clipStart) continue
             val len = clip.lengthBeats
@@ -448,7 +532,7 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank(), v
         }
     }
 
-    private fun fireNotes(pl: TrackPlayer, clip: Clip, swing: Float, lo: Double, hi: Double, loopOrigin: Double) {
+    private fun fireNotes(pl: TrackPlayer, clip: Clip, swing: Float, lo: Double, hi: Double, loopOrigin: Double, cutAt: Double = Double.MAX_VALUE) {
         for (note in clip.notes) {
             val s = swungStart(note.start, swing)
             if (s >= lo && s < hi) {
@@ -456,8 +540,27 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank(), v
                 val prev = pl.pending.firstOrNull { it.pitch == note.pitch }
                 if (prev != null) { pl.instrument.noteOff(note.pitch); pl.pending.remove(prev) }
                 pl.instrument.noteOn(note.pitch, note.velocity)
-                pl.pending.add(PendingOff(note.pitch, loopOrigin + s + max(0.01, note.duration)))
+                pl.pending.add(PendingOff(note.pitch, minOf(loopOrigin + s + max(0.01, note.duration), cutAt)))
             }
+        }
+    }
+
+    /** Plays the song clips of [t] that fall in [b0, b1) (song beats). Notes are cut at a clip's end. */
+    private fun fireSong(p: Project, t: Track, pl: TrackPlayer, b0: Double, b1: Double) {
+        val arr = p.arrangement
+        val hiLimit = if (arr.loop && !songRecording && arr.loopEnd > arr.loopStart) minOf(b1, arr.loopEnd) else b1
+        for (sc in arr.clips) {
+            if (sc.trackId != t.id || sc.end <= b0 || sc.start >= hiLimit) continue
+            val clip = sc.clip
+            if (clip.notes.isEmpty()) continue
+            val len = clip.lengthBeats
+            val from = max(b0, sc.start)
+            val to = minOf(hiLimit, sc.end)
+            if (to <= from) continue
+            val l0 = sc.localBeat(from)
+            val l1 = l0 + (to - from)
+            fireNotes(pl, clip, p.swing, l0, minOf(l1, len), from - l0, sc.end)
+            if (l1 > len) fireNotes(pl, clip, p.swing, 0.0, l1 - len, from - l0 + len, sc.end)
         }
     }
 
@@ -573,6 +676,9 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank(), v
             publishedAtNanos = now,
             tempo = project?.tempo ?: 120.0,
             outputLatencyMs = outputLatencyFrames * 1000.0 / sampleRate + extraLatencyMs,
+            songMode = songMode,
+            songRecording = songRecording,
+            songOverrides = if (songMode) playingScenes.keys.toSet() else emptySet(),
         )
     }
 

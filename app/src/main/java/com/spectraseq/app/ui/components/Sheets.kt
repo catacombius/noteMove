@@ -151,8 +151,8 @@ fun AppSettingsSheet(vm: StudioViewModel, onDismiss: () -> Unit) {
     }
 }
 
-/** Export to Ableton Live: a zipped Live project folder or just the .als, shared or saved. */
-@OptIn(ExperimentalMaterial3Api::class)
+/** Render to audio, or export to Ableton Live (a zipped Live project folder or just the .als), shared or saved. */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ExportSheet(vm: StudioViewModel, ui: StudioUi, onDismiss: () -> Unit) {
     val project = ui.project ?: return
@@ -162,14 +162,37 @@ fun ExportSheet(vm: StudioViewModel, ui: StudioUi, onDismiss: () -> Unit) {
     var mixdown by remember { mutableStateOf(true) }
     var midi by remember { mutableStateOf(true) }
     var arrangement by remember { mutableStateOf(true) }
+    val songEmpty = project.arrangement.isEmpty
+    var audio by remember {
+        mutableStateOf(com.spectraseq.app.export.AudioExportOptions(source = if (songEmpty) com.spectraseq.app.export.AudioExportOptions.Source.SCENES else com.spectraseq.app.export.AudioExportOptions.Source.SONG))
+    }
     val saveZip = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri -> uri?.let(vm::saveExportTo) }
     val saveAls = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri -> uri?.let(vm::saveExportTo) }
     ModalBottomSheet(onDismissRequest = { vm.resetExport(); onDismiss() }, containerColor = NM.surface) {
         Column(Modifier.padding(horizontal = 20.dp).verticalScroll(rememberScrollState()).navigationBarsPadding()) {
+            Text("Render to audio", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = NM.text)
+            Text("A finished audio file of the whole song (or the loop, or the scenes in order) — or every track as its own stem.",
+                fontSize = 12.sp, color = NM.textDim, modifier = Modifier.padding(vertical = 4.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (src in com.spectraseq.app.export.AudioExportOptions.Source.entries) {
+                    val enabled = !(songEmpty && src != com.spectraseq.app.export.AudioExportOptions.Source.SCENES)
+                    Chip(src.label + if (!enabled) " (empty)" else "", audio.source == src, { if (enabled) audio = audio.copy(source = src) })
+                }
+            }
+            FlowRow(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (f in com.spectraseq.app.export.AudioExportOptions.Format.entries) Chip(f.label, audio.format == f, { audio = audio.copy(format = f) })
+                for (rate in listOf(44100, 48000)) Chip("${rate / 1000.0} kHz".replace(".0 ", " "), audio.sampleRate == rate, { audio = audio.copy(sampleRate = rate) })
+            }
+            CheckRow("One file per track (stems, zipped with the mix)", audio.stems) { audio = audio.copy(stems = it) }
+            CheckRow("Normalise to −1 dB", audio.normalize) { audio = audio.copy(normalize = it) }
+            if (state == ExportState.Idle) {
+                Button({ vm.exportAudio(audio) }, Modifier.fillMaxWidth()) { Text(if (audio.stems) "Render stems" else "Render ${audio.source.label.lowercase()} to ${audio.format.label}") }
+            }
+            Spacer(Modifier.height(14.dp))
             Text("Export to Ableton Live", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = NM.text)
             Text(
-                "Creates a Live Set (.als) with every track as a MIDI track, clips in Session View and scenes laid out in " +
-                    "Arrangement View. Opens in Live 11 and 12.",
+                "Creates a Live Set (.als) with every track as a MIDI track, clips in Session View and your song in " +
+                    "Arrangement View (or the scenes in order when the song is empty). Opens in Live 11 and 12.",
                 fontSize = 12.sp, color = NM.textDim, modifier = Modifier.padding(vertical = 6.dp),
             )
             CheckRow("Render every clip as an audio loop (Samples/Rendered)", renderClips) { renderClips = it }

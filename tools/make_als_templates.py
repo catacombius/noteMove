@@ -66,6 +66,7 @@ sub1(r'<MidiClip Id="\d+" Time="[^"]*">', '<MidiClip Id="{{CLIP_ID}}" Time="{{TI
 sub1(r'<CurrentStart Value="[^"]*"/>', '<CurrentStart Value="{{CURRENT_START}}"/>')
 sub1(r'<CurrentEnd Value="[^"]*"/>', '<CurrentEnd Value="{{CURRENT_END}}"/>')
 sub1(r'<LoopEnd Value="[^"]*"/>', '<LoopEnd Value="{{LENGTH}}"/>')
+sub1(r'<StartRelative Value="[^"]*"/>', '<StartRelative Value="{{START_RELATIVE}}"/>')
 sub1(r'<LoopOn Value="[^"]*"/>', '<LoopOn Value="{{LOOP_ON}}"/>')
 sub1(r'<OutMarker Value="[^"]*"/>', '<OutMarker Value="{{LENGTH}}"/>')
 sub1(r'<HiddenLoopEnd Value="[^"]*"/>', '<HiddenLoopEnd Value="{{LENGTH}}"/>')

@@ -62,8 +62,8 @@ class KeyboardShortcuts(private val vm: StudioViewModel, private val back: () ->
         }
 
         when (e.keyCode) {
-            KeyEvent.KEYCODE_SPACE -> { if (first) vm.togglePlay(); return true }
-            KeyEvent.KEYCODE_F9 -> { if (first) vm.toggleRecord(); return true }
+            KeyEvent.KEYCODE_SPACE -> { if (first) { if (ui.panel == Panel.SONG) vm.toggleSongPlay() else vm.togglePlay() }; return true }
+            KeyEvent.KEYCODE_F9 -> { if (first) { if (shift) vm.toggleSongRecord() else vm.toggleRecord() }; return true }
             KeyEvent.KEYCODE_DEL, KeyEvent.KEYCODE_FORWARD_DEL -> { if (first) delete(); return true }
             KeyEvent.KEYCODE_TAB -> {
                 if (first) {
@@ -133,6 +133,7 @@ class KeyboardShortcuts(private val vm: StudioViewModel, private val back: () ->
     private fun duplicate() {
         val ui = vm.ui.value
         when {
+            ui.panel == Panel.SONG && ui.songSelection.isNotEmpty() -> vm.duplicateSongSelection()
             ui.noteSelection.isNotEmpty() -> vm.duplicateSelectedNotes()
             ui.clipSelection.isNotEmpty() -> vm.duplicateSelectedClips()
             else -> ui.track?.let { vm.duplicateClip(it.id, ui.selectedScene) }
@@ -142,6 +143,7 @@ class KeyboardShortcuts(private val vm: StudioViewModel, private val back: () ->
     private fun delete() {
         val ui = vm.ui.value
         when {
+            ui.panel == Panel.SONG && ui.songSelection.isNotEmpty() -> vm.deleteSongSelection()
             ui.noteSelection.isNotEmpty() -> vm.deleteSelectedNotes()
             ui.clipSelection.isNotEmpty() -> vm.deleteSelectedClips()
         }
@@ -198,8 +200,8 @@ class KeyboardShortcuts(private val vm: StudioViewModel, private val back: () ->
             "Z / X" to "Octave down / up",
             "C / V" to "Velocity down / up",
             "M" to "Computer MIDI keyboard on / off",
-            "Space" to "Play / stop",
-            "F9" to "Record",
+            "Space" to "Play / stop (the song when the Song view is open)",
+            "F9 / Shift+F9" to "Record / record to song",
             "Enter / Shift+Enter" to "Launch clip / launch scene",
             "Tab / Shift+Tab" to "Next / previous view",
             "← → ↑ ↓" to "Track / scene — with notes selected: move and transpose (Shift: length / octave)",

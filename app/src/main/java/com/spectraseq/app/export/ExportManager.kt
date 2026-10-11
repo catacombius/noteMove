@@ -46,6 +46,12 @@ class ExportManager(
         return f
     }
 
+    /** A mixdown or stems of the song / loop / scenes as WAV or AAC. */
+    fun buildAudio(project: Project, options: AudioExportOptions, onProgress: (String, Float) -> Unit): Pair<File, String> {
+        dir.listFiles()?.forEach { it.delete() }
+        return AudioExporter(sampleRate, samples, soundFonts).export(project, options, dir, onProgress)
+    }
+
     fun shareIntent(file: File, mime: String): Intent {
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
         return Intent(Intent.ACTION_SEND).apply {

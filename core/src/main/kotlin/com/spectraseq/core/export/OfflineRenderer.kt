@@ -50,6 +50,66 @@ class OfflineRenderer(private val sampleRate: Int, private val samples: SampleBa
         return Stereo(l, r)
     }
 
+    /**
+     * Renders the song timeline from [fromBeat] to [toBeat] (default: the whole song, or the loop region when
+     * [loopOnly]) plus a tail. Returns null when the song is empty.
+     */
+    fun renderArrangement(
+        project: Project,
+        loopOnly: Boolean = false,
+        tailSeconds: Double = 2.0,
+        onProgress: (Float) -> Unit = {},
+    ): Stereo? {
+        val arr = project.arrangement
+        if (arr.isEmpty) return null
+        val from = if (loopOnly) arr.loopStart else 0.0
+        val to = if (loopOnly) arr.loopEnd else arr.length
+        if (to <= from) return null
+        val engine = AudioEngine(sampleRate, samples, soundFonts)
+        // Looping is for listening; a render plays straight through.
+        engine.setProject(project.copy(arrangement = arr.copy(loop = false)))
+        engine.playSong(from)
+        val total = beatsToFrames(project, to - from)
+        val out = renderFramesProgress(engine, total) { onProgress(it * 0.95f) }
+        engine.stop()
+        val tail = renderFrames(engine, (tailSeconds * sampleRate).toInt())
+        onProgress(1f)
+        return concat(listOf(out, tail))
+    }
+
+    /** One render per track (soloed, with its effects and sends) over the same span as [renderArrangement] / [renderSong]. */
+    fun renderStems(project: Project, useSong: Boolean, loopOnly: Boolean = false, onProgress: (Float) -> Unit = {}): List<Pair<String, Stereo>> {
+        val tracks = project.tracks
+        return tracks.mapIndexedNotNull { i, t ->
+            val solo = project.copy(tracks = project.tracks.map { it.copy(solo = it.id == t.id, mute = false) })
+            val part: (Float) -> Unit = { f -> onProgress((i + f) / tracks.size) }
+            val audio = if (useSong) renderArrangement(solo, loopOnly, onProgress = part) else renderSong(solo, onProgress = part)
+            audio?.let { t.name to it }
+        }
+    }
+
+    private fun renderFramesProgress(engine: AudioEngine, frames: Int, onProgress: (Float) -> Unit): Stereo {
+        val l = FloatArray(frames); val r = FloatArray(frames)
+        val chunk = 4096
+        var done = 0
+        while (done < frames) {
+            val n = minOf(chunk, frames - done)
+            val part = renderFrames(engine, n)
+            System.arraycopy(part.left, 0, l, done, n); System.arraycopy(part.right, 0, r, done, n)
+            done += n
+            onProgress(done.toFloat() / frames)
+        }
+        return Stereo(l, r)
+    }
+
+    private fun concat(parts: List<Stereo>): Stereo {
+        val total = parts.sumOf { it.left.size }
+        val l = FloatArray(total); val r = FloatArray(total)
+        var o = 0
+        for (p in parts) { System.arraycopy(p.left, 0, l, o, p.left.size); System.arraycopy(p.right, 0, r, o, p.right.size); o += p.left.size }
+        return Stereo(l, r)
+    }
+
     private fun beatsToFrames(project: Project, beats: Double) = (beats * 60.0 / project.tempo * sampleRate).toInt()
 
     private fun renderFrames(engine: AudioEngine, frames: Int): Stereo {

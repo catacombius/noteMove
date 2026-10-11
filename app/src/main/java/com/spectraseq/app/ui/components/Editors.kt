@@ -596,6 +596,12 @@ fun ClipEditor(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, mo
         }
     }
     Column(modifier) {
+        ui.editingSongClip?.let { sc ->
+            Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("← Song", true, vm::exitSongClipEditing, color = NM.accent)
+                Text("Editing a song clip at bar ${(sc.start / 4).toInt() + 1} (its own copy of the notes)", fontSize = 12.sp, color = NM.textDim)
+            }
+        }
         if (ui.noteSelection.isNotEmpty()) NoteSelectionBar(vm, ui) else ClipToolbar(vm, ui)
         Box(Modifier.weight(1f).fillMaxWidth().padding(top = 6.dp)) {
             if (track.drumLayout) {

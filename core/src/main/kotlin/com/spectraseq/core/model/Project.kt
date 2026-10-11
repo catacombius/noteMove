@@ -120,6 +120,8 @@ data class Project(
     /** Effects on the master bus, before the limiter. */
     val masterEffects: List<EffectSlot> = emptyList(),
     val launchQuantization: LaunchQuantization = LaunchQuantization.BAR,
+    /** The song timeline (Arrangement View). */
+    val arrangement: Arrangement = Arrangement(),
     val createdAt: Long = System.currentTimeMillis(),
     val modifiedAt: Long = System.currentTimeMillis(),
 ) {

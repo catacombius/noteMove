@@ -105,4 +105,28 @@ class LiveSetExporterTest {
         val gz = GZIPInputStream(ByteArrayInputStream(LiveSetExporter().exportBytes(sampleProject()))).readBytes()
         assertTrue(gz.isNotEmpty())
     }
+
+    @Test
+    fun songRoundTripsAsArrangement() {
+        val base = sampleProject()
+        val t0 = base.tracks[0]
+        val clip = t0.clips.values.first()
+        val song = com.spectraseq.core.model.Arrangement(
+            listOf(
+                com.spectraseq.core.model.SongClip(trackId = t0.id, start = 4.0, length = 6.0, clip = clip, offset = 1.0),
+                com.spectraseq.core.model.SongClip(trackId = t0.id, start = 12.0, length = 2.0, clip = clip),
+            ),
+        )
+        val project = base.copy(arrangement = song)
+        val xml = LiveSetExporter().buildXml(project)
+        assertTrue(xml.contains("<StartRelative Value=\"1\"/>"))
+        assertTrue(!xml.contains("{{"))
+        parse(xml)
+        val back = LiveSetImporter.import(ByteArrayInputStream(LiveSetExporter().exportBytes(project)), "Back")
+        val placed = back.arrangement.clipsOn(back.tracks[0].id)
+        assertEquals(listOf(4.0, 12.0), placed.map { it.start })
+        assertEquals(listOf(6.0, 2.0), placed.map { it.length })
+        assertEquals(1.0, placed[0].offset, 1e-9)
+        File("build/test-output").apply { mkdirs() }.resolve("song.als").writeBytes(LiveSetExporter().exportBytes(project))
+    }
 }

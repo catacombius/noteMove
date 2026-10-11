@@ -1,6 +1,8 @@
 package com.spectraseq.core.export
 
+import com.spectraseq.core.model.Arrangement
 import com.spectraseq.core.model.Clip
+import com.spectraseq.core.model.SongClip
 import com.spectraseq.core.model.DrumKits
 import com.spectraseq.core.model.Note
 import com.spectraseq.core.model.Project
@@ -46,7 +48,10 @@ object LiveSetImporter {
         val root = liveSet.path("ScaleInformation", "RootNote")?.value()?.toIntOrNull() ?: 0
         val scale = Scale.entries.firstOrNull { it.liveName.equals(scaleName, ignoreCase = true) } ?: Scale.MINOR
 
-        data class Raw(val name: String, val color: Int, val drums: Boolean, val session: Map<Int, Clip>, val arrangement: List<Pair<Double, Clip>>)
+        data class Placed(val time: Double, val end: Double, val offset: Double, val clip: Clip)
+        data class Raw(val name: String, val color: Int, val drums: Boolean, val session: Map<Int, Clip>, val placed: List<Placed>) {
+            val arrangement: List<Pair<Double, Clip>> get() = placed.map { it.time to it.clip }
+        }
 
         val raws = ArrayList<Raw>()
         val tracks = liveSet.child("Tracks") ?: throw ImportException("Live Set has no tracks")
@@ -62,14 +67,19 @@ object LiveSetImporter {
                 val clip = slot.path("ClipSlot", "Value", "MidiClip")
                 if (clip != null) readClip(clip)?.let { session[i] = it }
             }
-            val arrangement = ArrayList<Pair<Double, Clip>>()
+            val arrangement = ArrayList<Placed>()
             seq?.path("ClipTimeable", "ArrangerAutomation", "Events")?.children()?.forEach { c ->
-                if (c.tagName == "MidiClip") readClip(c)?.let { arrangement.add((c.getAttribute("Time").toDoubleOrNull() ?: 0.0) to it) }
+                if (c.tagName == "MidiClip") readClip(c)?.let { clip ->
+                    val time = c.getAttribute("Time").toDoubleOrNull() ?: 0.0
+                    val end = c.child("CurrentEnd")?.value()?.toDoubleOrNull() ?: (time + clip.lengthBeats)
+                    val offset = c.path("Loop", "StartRelative")?.value()?.toDoubleOrNull() ?: 0.0
+                    arrangement.add(Placed(time, maxOf(end, time + 0.25), offset, clip))
+                }
             }
             val hasDrumRack = t.getElementsByTagName("DrumGroupDevice").length > 0
             val lname = name.lowercase()
             val drums = hasDrumRack || listOf("drum", "kit", "beat", "perc", "808", "909").any { lname.contains(it) }
-            raws.add(Raw(name, liveColor, drums, session, arrangement.sortedBy { it.first }))
+            raws.add(Raw(name, liveColor, drums, session, arrangement.sortedBy { it.time }))
         }
         if (raws.isEmpty()) throw ImportException("This Live Set has no MIDI tracks")
 
@@ -86,7 +96,14 @@ object LiveSetImporter {
             else Track(name = r.name, kind = TrackKind.SYNTH, color = colorIdx, synth = IMPORT_SYNTHS[i % IMPORT_SYNTHS.size], clips = clips)
         }
         val sceneCount = (result.flatMap { it.clips.keys }.maxOrNull() ?: 0) + 1
+        // The arrangement also becomes the song timeline.
+        val song = Arrangement(
+            raws.take(Project.MAX_TRACKS).zip(result).flatMap { (r, t) ->
+                r.placed.map { SongClip(trackId = t.id, start = it.time, length = it.end - it.time, clip = it.clip, offset = it.offset % it.clip.lengthBeats) }
+            },
+        )
         return Project(
+            arrangement = song,
             name = fallbackName,
             tempo = tempo.coerceIn(20.0, 999.0),
             rootNote = root.coerceIn(0, 11),
