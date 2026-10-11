@@ -88,6 +88,7 @@ fun StudioScreen(vm: StudioViewModel, ui: StudioUi, layout: DeviceLayout) {
         when (overlay) {
             Overlay.SETTINGS -> settings = true
             Overlay.EXPORT -> export = true
+            Overlay.SAMPLE -> sample = true
             null -> Unit
         }
         vm.overlayRequest.value = null

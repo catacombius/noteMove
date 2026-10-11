@@ -61,6 +61,25 @@ fun Modifier.onWheel(action: (delta: Offset, mods: PointerKeyboardModifiers) -> 
     }
 }
 
+/** Like [onWheel], also passing the pointer position (for zooming around the cursor). */
+fun Modifier.onWheelAt(action: (delta: Offset, mods: PointerKeyboardModifiers, position: Offset) -> Unit): Modifier = composed {
+    val cb by rememberUpdatedState(action)
+    pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) {
+                val e = awaitPointerEvent()
+                if (e.type == PointerEventType.Scroll) {
+                    val d = e.changes.fold(Offset.Zero) { acc, c -> acc + c.scrollDelta }
+                    if (d != Offset.Zero) {
+                        cb(d, e.keyboardModifiers, e.changes.first().position)
+                        e.changes.forEach { it.consume() }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /** Ctrl (or Cmd on Mac-layout keyboards). */
 val PointerKeyboardModifiers.isCommand: Boolean get() = isCtrlPressed || isMetaPressed
 

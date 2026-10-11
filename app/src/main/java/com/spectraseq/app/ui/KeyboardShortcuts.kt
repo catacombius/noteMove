@@ -155,13 +155,7 @@ class KeyboardShortcuts(private val vm: StudioViewModel, private val back: () ->
         else vm.quantizeClip(g)
     }
 
-    private fun stepGrid(finer: Boolean) {
-        val grids = ClipOps.GRIDS.filter { !it.second.endsWith("T") }.sortedByDescending { it.first } // straight grids, coarse -> fine
-        val i = grids.indexOfFirst { kotlin.math.abs(it.first - vm.ui.value.stepGrid) < 1e-9 }.coerceAtLeast(0)
-        val next = grids[(i + if (finer) 1 else -1).coerceIn(0, grids.lastIndex)]
-        vm.setStepGrid(next.first)
-        vm.toast("Grid ${next.second}")
-    }
+    private fun stepGrid(finer: Boolean) = vm.stepGridFiner(finer)
 
     /**
      * With notes selected: ←/→ move by the grid, Shift+←/→ shorten / lengthen, ↑/↓ transpose (Shift = octave).

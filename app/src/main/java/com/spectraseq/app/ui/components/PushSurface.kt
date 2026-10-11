@@ -101,7 +101,7 @@ private fun SequenceSurface(vm: StudioViewModel, ui: StudioUi, engine: State<Eng
             )
             PageDots(pager, pages, inClipPages)
         }
-        StepPager(vm, ui, pages, Modifier.weight(stepRows.toFloat()).fillMaxWidth(), pager) { page ->
+        StepPager(vm, ui, pages, Modifier.weight(stepRows.toFloat()).fillMaxWidth().pinchSteps { vm.stepGridFiner(it, stepRows * cols) }, pager) { page ->
             StepGrid(vm, ui, engine, stepRows, cols, pitches, page, Modifier.fillMaxSize())
         }
         Box(Modifier.weight(padRows.toFloat()).fillMaxWidth()) {

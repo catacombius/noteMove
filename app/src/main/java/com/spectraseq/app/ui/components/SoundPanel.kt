@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -16,6 +17,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,10 +44,16 @@ import kotlin.math.pow
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SoundPanel(vm: StudioViewModel, ui: StudioUi, onSample: () -> Unit, modifier: Modifier = Modifier) {
+    AdaptiveKnobs(modifier) { SoundPanelContent(vm, ui, onSample, Modifier.fillMaxSize()) }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SoundPanelContent(vm: StudioViewModel, ui: StudioUi, onSample: () -> Unit, modifier: Modifier = Modifier) {
     val track = ui.track ?: return
     val color = NM.track(track.color)
     Column(modifier.verticalScroll(rememberScrollState())) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(track.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = NM.text)
             for (k in TrackKind.entries) Chip(k.label, track.kind == k, { vm.changeTrackKind(k) }, color = color)
         }

@@ -20,6 +20,9 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,6 +34,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.geometry.CornerRadius
+import kotlin.math.pow
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.isShiftPressed
@@ -42,6 +51,22 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.spectraseq.app.ui.theme.NM
+
+/** Default knob size for a panel; [AdaptiveKnobs] picks it from the available width. */
+val LocalKnobSize = staticCompositionLocalOf { 52.dp }
+
+/** Gives knobs inside a size that suits the space: smaller on the cover screen, larger unfolded. */
+@Composable
+fun AdaptiveKnobs(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    BoxWithConstraints(modifier) {
+        val size = when {
+            maxWidth < 380.dp -> 44.dp
+            maxWidth > 900.dp -> 60.dp
+            else -> 52.dp
+        }
+        CompositionLocalProvider(LocalKnobSize provides size) { content() }
+    }
+}
 
 /**
  * Rotary knob (like the encoders on Move). Drag up/down to change, double-tap to reset.
@@ -56,7 +81,7 @@ fun Knob(
     color: Color = NM.accent,
     default: Float = 0.5f,
     bipolar: Boolean = false,
-    size: Dp = 52.dp,
+    size: Dp = LocalKnobSize.current,
     display: (Float) -> String = { "${(it * 100).toInt()}" },
 ) {
     val current by rememberUpdatedState(value)
@@ -85,10 +110,14 @@ fun Knob(
             val start = if (bipolar) 270f else 135f
             val sweep = if (bipolar) (value - 0.5f) * 270f else value * 270f
             drawArc(color, start, sweep, false, Offset(inset, inset), arcSize, style = Stroke(stroke, cap = StrokeCap.Round))
-            val angle = Math.toRadians((135.0 + value * 270.0))
-            val r = arcSize.width / 2 - stroke
+            // Inner cap with a position dot (SpectraSeq style) instead of a pointer line.
             val c = center
-            drawLine(NM.text, c, Offset(c.x + (r * kotlin.math.cos(angle)).toFloat(), c.y + (r * kotlin.math.sin(angle)).toFloat()), 3.dp.toPx(), StrokeCap.Round)
+            val capR = arcSize.width / 2 - stroke * 1.6f
+            drawCircle(NM.surfaceHigh, capR, c)
+            drawCircle(NM.line, capR, c, style = Stroke(1.dp.toPx()))
+            val angle = Math.toRadians((135.0 + value * 270.0))
+            val dr = capR - 4.dp.toPx()
+            drawCircle(NM.text, 2.6.dp.toPx(), Offset(c.x + (dr * kotlin.math.cos(angle)).toFloat(), c.y + (dr * kotlin.math.sin(angle)).toFloat()))
         }
         // Touch & hold a knob for precise values.
         DropdownMenu(menu, { menu = false }) {
@@ -120,17 +149,33 @@ fun Chip(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifie
     }
 }
 
-/** Vertical fader with a level meter, used in the mixer. */
+/**
+ * Vertical fader: a rounded channel that fills with the track colour, a segmented LED meter with peak
+ * hold beside it, and a round cap that shows the gain in dB while you drag. Drag, wheel or tap to set;
+ * double-tap resets to 0 dB.
+ */
 @Composable
 fun Fader(value: Float, onChange: (Float) -> Unit, level: Float, color: Color, modifier: Modifier = Modifier) {
     val current by rememberUpdatedState(value)
     val change by rememberUpdatedState(onChange)
+    var dragging by remember { mutableStateOf(false) }
+    // Peak hold: jumps up instantly, falls back slowly.
+    val peak = remember { FloatArray(1) }
+    val peakAt = remember { LongArray(1) }
+    val now = System.nanoTime()
+    val meterPos = levelToMeter(level)
+    if (meterPos >= peak[0] || now - peakAt[0] > 1_200_000_000L) { peak[0] = meterPos; peakAt[0] = now }
+    val measurer = rememberTextMeasurer()
     Canvas(
         modifier
-            .width(44.dp)
+            .width(52.dp)
             .onWheel { d, mods -> change((current - d.y * if (mods.isShiftPressed) 0.005f else 0.03f).coerceIn(0f, 1f)) }
             .pointerInput(Unit) {
-                detectVerticalDragGestures { c, dy -> c.consume(); change((current - dy / size.height).coerceIn(0f, 1f)) }
+                detectVerticalDragGestures(
+                    onDragStart = { dragging = true },
+                    onDragEnd = { dragging = false },
+                    onDragCancel = { dragging = false },
+                ) { c, dy -> c.consume(); change((current - dy / size.height).coerceIn(0f, 1f)) }
             }
             .pointerInput(Unit) {
                 detectTapGestures(onDoubleTap = { change(0.8f) }) { o -> change((1f - o.y / size.height).coerceIn(0f, 1f)) }
@@ -138,16 +183,71 @@ fun Fader(value: Float, onChange: (Float) -> Unit, level: Float, color: Color, m
     ) {
         val w = size.width
         val h = size.height
-        drawRoundRect(NM.padDim, size = Size(w, h), cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f))
-        // meter
-        val lv = (level.coerceIn(0f, 1.2f) / 1.2f)
-        drawRect(if (level > 0.98f) NM.record else NM.play.copy(alpha = 0.8f), Offset(4f, h * (1 - lv)), Size(8f, h * lv))
-        // fill
-        drawRect(color.copy(alpha = 0.35f), Offset(16f, h * (1 - value)), Size(w - 20f, h * value))
-        drawRect(color, Offset(12f, h * (1 - value) - 3f), Size(w - 12f, 6f))
-        // 0 dB mark (value 0.8)
-        drawLine(NM.textDim, Offset(14f, h * 0.2f), Offset(w, h * 0.2f), 1f)
+        val capR = 11.dp.toPx()
+        val top = capR
+        val travel = h - capR * 2
+        fun yOf(v: Float) = top + travel * (1f - v)
+
+        // LED meter (left column): 24 segments, green -> amber -> red.
+        val segs = 24
+        val mx = 2.dp.toPx()
+        val mw = 7.dp.toPx()
+        val segH = travel / segs
+        for (i in 0 until segs) {
+            val frac = (i + 0.5f) / segs
+            val on = frac <= meterPos
+            val c = when { frac > 0.9f -> NM.record; frac > 0.72f -> NM.queued; else -> NM.play }
+            drawRoundRect(if (on) c else c.copy(alpha = 0.12f), Offset(mx, top + travel - (i + 1) * segH + 1f), Size(mw, segH - 2f), CornerRadius(2f))
+        }
+        val py = top + travel * (1f - peak[0])
+        if (peak[0] > 0.02f) drawLine(NM.text, Offset(mx, py), Offset(mx + mw, py), 2f)
+
+        // Channel (pill) with gradient fill up to the fader position.
+        val cx = mx + mw + 6.dp.toPx()
+        val cw = w - cx - 2.dp.toPx()
+        val radius = CornerRadius(cw / 2)
+        drawRoundRect(NM.padDim, Offset(cx, top - cw / 4), Size(cw, travel + cw / 2), radius)
+        val fy = yOf(value)
+        drawRoundRect(
+            Brush.verticalGradient(listOf(color, color.copy(alpha = 0.18f)), startY = fy, endY = top + travel),
+            Offset(cx, fy), Size(cw, top + travel + cw / 4 - fy), radius,
+        )
+        // dB ticks: 0, -6, -12, -24
+        for (db in intArrayOf(0, -6, -12, -24)) {
+            val ty = yOf(dbToFader(db.toFloat()))
+            drawLine(if (db == 0) NM.text.copy(alpha = 0.7f) else NM.textDim.copy(alpha = 0.45f), Offset(cx + cw * 0.18f, ty), Offset(cx + cw * 0.82f, ty), if (db == 0) 2f else 1f)
+        }
+        // Cap
+        val capC = Offset(cx + cw / 2, fy)
+        drawCircle(Color.Black.copy(alpha = 0.35f), capR + 2.dp.toPx(), capC + Offset(0f, 1.5.dp.toPx()))
+        drawCircle(NM.surfaceHigh, capR, capC)
+        drawCircle(color, capR, capC, style = Stroke(2.5.dp.toPx()))
+        drawCircle(color, 3.dp.toPx(), capC)
+        if (dragging) {
+            val label = measurer.measure(faderDb(value), TextStyle(fontSize = 11.sp, color = NM.text, fontWeight = FontWeight.Bold))
+            val bx = (capC.x - label.size.width / 2f).coerceIn(0f, w - label.size.width)
+            val by = (fy - capR - label.size.height - 6.dp.toPx()).coerceAtLeast(0f)
+            drawRoundRect(NM.bg.copy(alpha = 0.9f), Offset(bx - 4.dp.toPx(), by - 2.dp.toPx()),
+                Size(label.size.width + 8.dp.toPx(), label.size.height + 4.dp.toPx()), CornerRadius(6f))
+            drawText(label, topLeft = Offset(bx, by))
+        }
     }
+}
+
+/** Fader position 0..1 for a gain in dB (0.8 = 0 dB, gain = v² / 0.64). */
+fun dbToFader(db: Float): Float = kotlin.math.sqrt(0.64f * 10f.pow(db / 20f)).coerceIn(0f, 1f)
+
+fun faderDb(v: Float): String {
+    val gain = v * v / 0.64f
+    if (gain <= 0.0001f) return "−∞ dB"
+    val db = 20 * kotlin.math.log10(gain)
+    return String.format(java.util.Locale.ROOT, "%+.1f dB", db)
+}
+
+/** Meter position 0..1 for a peak level: −60 dB … +6 dB. */
+private fun levelToMeter(level: Float): Float {
+    if (level <= 0.001f) return 0f
+    return ((20 * kotlin.math.log10(level) + 60f) / 66f).coerceIn(0f, 1f)
 }
 
 @Composable

@@ -62,7 +62,7 @@ enum class RowLayout(val label: String, val inKeySteps: Int, val semitones: Int)
 }
 
 /** Sheets the keyboard can open (Ctrl+E, Ctrl+,). */
-enum class Overlay { SETTINGS, EXPORT }
+enum class Overlay { SETTINGS, EXPORT, SAMPLE }
 
 /** Live-style computer MIDI keyboard: [octave] is where the A key sits on melodic tracks (C3 = middle C), [drumOctave] on drums. */
 data class ComputerKeys(val enabled: Boolean = true, val octave: Int = 3, val drumOctave: Int = 1, val velocity: Int = 100)
@@ -183,11 +183,39 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) { _library.value = repo.list() }
     }
 
-    fun newProject(name: String) {
-        val p = Project.createDefault(name.ifBlank { "Sketch ${_library.value.size + 1}" })
+    fun newProject(name: String, template: com.spectraseq.core.model.SetTemplate = com.spectraseq.core.model.SetTemplate.BAND) {
+        val p = template.create(name.ifBlank { nextSketchName() })
         repo.save(p)
         open(p)
+        when (template) {
+            com.spectraseq.core.model.SetTemplate.SLICE -> {
+                // Straight into the sample picker; the loaded sample then opens in the slicer.
+                autoSliceNextSample = true
+                setPanel(Panel.SOUND)
+                requestOverlay(Overlay.SAMPLE)
+            }
+            com.spectraseq.core.model.SetTemplate.GENERAL_MIDI -> {
+                setPanel(Panel.SOUND)
+                val lib = _fontLibrary.value
+                val font = lib.firstOrNull { it.name.contains("GeneralUser", true) } ?: lib.firstOrNull()
+                if (font == null) {
+                    p.tracks.firstOrNull { it.kind == TrackKind.SOUNDFONT }?.let { selectTrack(it.id) }
+                    toast("Download a free General MIDI library below to hear these tracks")
+                } else {
+                    // Put the font on every SoundFont track, keeping each track's program (piano, strings…).
+                    viewModelScope.launch {
+                        for (t in p.tracks.filter { it.kind == TrackKind.SOUNDFONT }) applySoundFont(font, t.id, t.soundfont?.program ?: 0)
+                    }
+                }
+            }
+            else -> Unit
+        }
     }
+
+    fun nextSketchName(): String = "Sketch ${_library.value.size + 1}"
+
+    /** Set by the "Slice a loop" template: the next sample loaded opens straight in the slicer. */
+    private var autoSliceNextSample = false
 
     fun openProject(id: String) {
         viewModelScope.launch {
@@ -322,6 +350,23 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     fun setRecordQuantize(q: Double?) = _ui.update { it.copy(recordQuantize = q) }
     fun setStepGrid(g: Double) = _ui.update { it.copy(stepGrid = g, stepPage = 0) }
     fun setStepPage(p: Int) = _ui.update { it.copy(stepPage = p.coerceAtLeast(0)) }
+
+    /**
+     * Push-style zoom: steps the straight grid finer (1/4 → 1/8 → 1/16 → 1/32) or coarser, keeping the beat at
+     * the start of the current page on screen. [stepsPerPage] is how many steps the sequencer shows per page.
+     */
+    fun stepGridFiner(finer: Boolean, stepsPerPage: Int = 16) {
+        val grids = ClipOps.GRIDS.filter { !it.second.endsWith("T") }.sortedByDescending { it.first }
+        val s = _ui.value
+        val i = grids.indexOfFirst { kotlin.math.abs(it.first - s.stepGrid) < 1e-9 }.let { if (it < 0) grids.indexOfFirst { g -> g.first <= s.stepGrid } else it }.coerceAtLeast(0)
+        val j = (i + if (finer) 1 else -1).coerceIn(0, grids.lastIndex)
+        if (j == i && kotlin.math.abs(grids[i].first - s.stepGrid) < 1e-9) return
+        val (g, label) = grids[j]
+        val pageStart = s.stepPage * stepsPerPage * s.stepGrid
+        val page = kotlin.math.floor(pageStart / (stepsPerPage * g) + 1e-9).toInt()
+        _ui.update { it.copy(stepGrid = g, stepPage = page.coerceAtLeast(0)) }
+        toast("Steps $label")
+    }
     fun setNewClipBars(b: Int) = _ui.update { it.copy(newClipBars = b) }
 
     fun toggleMetronome() {
@@ -579,6 +624,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
             toast("Sample \"$name\" loaded")
+            if (autoSliceNextSample) { autoSliceNextSample = false; openSlicer(ref.id) }
         }
     }
 
@@ -1054,18 +1100,22 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     /** Uses a library SoundFont on the selected track (loading it first if needed). */
     fun useSoundFont(ref: SoundFontRef) {
         val t = _ui.value.track ?: return
-        viewModelScope.launch {
-            if (!engine.soundFonts.contains(ref.id)) {
-                _fontBusy.value = "Loading ${ref.name}…"
-                withContext(Dispatchers.IO) { runCatching { engine.soundFonts.put(ref.id, SoundFont.parse(repo.soundFontFile(ref).readBytes(), ref.name)) } }
-                _fontBusy.value = null
-                fontsVersion.value++
-            }
-            val first = presetsOf(ref.id).firstOrNull()
-            edit { p ->
-                p.copy(soundFonts = if (p.soundFonts.any { it.id == ref.id }) p.soundFonts else p.soundFonts + ref).updateTrack(t.id) {
-                    it.copy(kind = TrackKind.SOUNDFONT, soundfont = SoundFontPatch(ref.id, ref.name, first?.bank ?: 0, first?.program ?: 0, first?.name ?: ""))
-                }
+        viewModelScope.launch { applySoundFont(ref, t.id, null) }
+    }
+
+    /** Loads [ref] if needed and puts it on track [trackId] with [program] (bank 0), or the font's first preset. */
+    private suspend fun applySoundFont(ref: SoundFontRef, trackId: String, program: Int?) {
+        if (!engine.soundFonts.contains(ref.id)) {
+            _fontBusy.value = "Loading ${ref.name}…"
+            withContext(Dispatchers.IO) { runCatching { engine.soundFonts.put(ref.id, SoundFont.parse(repo.soundFontFile(ref).readBytes(), ref.name)) } }
+            _fontBusy.value = null
+            fontsVersion.value++
+        }
+        val presets = presetsOf(ref.id)
+        val pick = program?.let { pr -> presets.firstOrNull { it.bank == 0 && it.program == pr } } ?: presets.firstOrNull()
+        edit { p ->
+            p.copy(soundFonts = if (p.soundFonts.any { it.id == ref.id }) p.soundFonts else p.soundFonts + ref).updateTrack(trackId) {
+                it.copy(kind = TrackKind.SOUNDFONT, soundfont = SoundFontPatch(ref.id, ref.name, pick?.bank ?: 0, pick?.program ?: 0, pick?.name ?: ""))
             }
         }
     }

@@ -201,7 +201,7 @@ fun StepStrip(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, mod
             PageDots(pager, pages, inClipPages)
         }
         Spacer(Modifier.height(4.dp))
-        StepPager(vm, ui, pages, Modifier.weight(1f).fillMaxWidth(), pager) { page ->
+        StepPager(vm, ui, pages, Modifier.weight(1f).fillMaxWidth().pinchSteps { vm.stepGridFiner(it, 16) }, pager) { page ->
             val perRow = if (rowsOf8) 8 else 16
             Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 for (r in 0 until 16 / perRow) {

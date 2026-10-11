@@ -30,12 +30,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -69,6 +71,12 @@ fun SessionGrid(
     onEditTrack: (Track) -> Unit = {},
 ) {
     val project = ui.project ?: return
+    // Pinch to resize the slots (remembered).
+    val splits by vm.splits.collectAsState()
+    val sx = splits["session_scale_x"] ?: 1f
+    val sy = splits["session_scale_y"] ?: 1f
+    val colWidth = colWidth * sx
+    val rowHeight = rowHeight * sy
     // Only recompose slots when which clips are playing / queued changes, not every frame.
     val playing by remember(engine) { derivedStateOf { engine.value.playingScenes } }
     val queued by remember(engine) { derivedStateOf { engine.value.queuedScenes } }
@@ -85,8 +93,17 @@ fun SessionGrid(
             AddTrackButton(vm, colWidth)
             Box(Modifier.width(64.dp))
         }
-        Box(Modifier.weight(1f, fill = true)) {
-            Column(Modifier.verticalScroll(vScroll).horizontalScroll(hScroll)) {
+        Box(
+            Modifier.weight(1f, fill = true)
+                .pinchScale { fx, fy ->
+                    vm.setSplit("session_scale_x", (sx * fx).coerceIn(0.6f, 2.2f))
+                    vm.setSplit("session_scale_y", (sy * fy).coerceIn(0.6f, 2.2f))
+                }
+                .onWheel { d, mods -> if (mods.isShiftPressed) hScroll.dispatchRawDelta(d.y * 120f) else { vScroll.dispatchRawDelta(d.y * 120f); hScroll.dispatchRawDelta(d.x * 120f) } }
+                .pan2D(hScroll, vScroll),
+        ) {
+            // Scrolling is driven by pan2D (free diagonal drag with fling), so the containers' own gestures are off.
+            Column(Modifier.verticalScroll(vScroll, enabled = false).horizontalScroll(hScroll, enabled = false)) {
                 for (scene in 0 until project.sceneCount) {
                     Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                         for (t in project.tracks) {

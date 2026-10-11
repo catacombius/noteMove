@@ -39,6 +39,10 @@ data class DeviceLayout(
     val landscape get() = widthDp > heightDp
     /** Compact cover screens turned sideways get a two-column layout too. */
     val wideCover get() = mode == Mode.COVER && landscape && widthDp >= 640
+
+    /** The same layout measured in scaled dp (interface size [s]); the mode stays as detected. */
+    fun scaled(s: Float): DeviceLayout =
+        if (s == 1f) this else copy(widthDp = (widthDp / s).toInt(), heightDp = (heightDp / s).toInt(), hingeDp = hingeDp / s, hingeSizeDp = hingeSizeDp / s)
 }
 
 @Composable

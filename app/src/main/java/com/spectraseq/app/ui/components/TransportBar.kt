@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -56,6 +57,23 @@ import kotlin.math.floor
 
 @Composable
 fun TransportBar(
+    vm: StudioViewModel,
+    ui: StudioUi,
+    engine: State<EngineState>,
+    compact: Boolean,
+    onBack: () -> Unit,
+    onSettings: () -> Unit,
+    onExport: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // Narrow windows (cover screen, split screen, large interface size) get the compact bar automatically.
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        TransportBarContent(vm, ui, engine, compact || maxWidth < 560.dp, onBack, onSettings, onExport, Modifier)
+    }
+}
+
+@Composable
+private fun TransportBarContent(
     vm: StudioViewModel,
     ui: StudioUi,
     engine: State<EngineState>,

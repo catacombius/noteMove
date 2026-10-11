@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -45,6 +46,12 @@ import com.spectraseq.core.model.MAX_EFFECTS
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EffectsPanel(vm: StudioViewModel, ui: StudioUi, modifier: Modifier = Modifier) {
+    AdaptiveKnobs(modifier) { EffectsPanelContent(vm, ui, Modifier.fillMaxSize()) }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun EffectsPanelContent(vm: StudioViewModel, ui: StudioUi, modifier: Modifier = Modifier) {
     val project = ui.project ?: return
     val target = ui.fxTarget.takeIf { it.trackId == null || project.track(it.trackId) != null } ?: FxTarget(ui.track?.id)
     val slots = vm.effectsOf(project, target)

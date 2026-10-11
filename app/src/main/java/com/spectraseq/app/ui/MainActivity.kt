@@ -10,9 +10,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -20,7 +23,9 @@ import com.spectraseq.app.app
 import com.spectraseq.app.ui.components.displayName
 import com.spectraseq.app.ui.screens.LibraryScreen
 import com.spectraseq.app.ui.screens.StudioScreen
+import com.spectraseq.app.ui.theme.Appearance
 import com.spectraseq.app.ui.theme.SpectraSeqTheme
+import com.spectraseq.app.ui.theme.UiScale
 
 class MainActivity : ComponentActivity() {
     private val vm: StudioViewModel by viewModels()
@@ -33,10 +38,16 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         handleIntent(intent)
+        Appearance.load(this)
         setContent {
             SpectraSeqTheme {
                 val ui by vm.ui.collectAsState()
-                val layout = rememberDeviceLayout(this)
+                val raw = rememberDeviceLayout(this)
+                // Interface size: a separate scale for the cover and the inner screen, applied by scaling density.
+                val scale = (if (raw.mode == DeviceLayout.Mode.COVER) UiScale.cover else UiScale.inner).coerceIn(0.7f, 1.6f)
+                val base = LocalDensity.current
+                CompositionLocalProvider(LocalDensity provides Density(base.density * scale, base.fontScale)) {
+                val layout = raw.scaled(scale)
                 val hideNav by vm.hideNavBar.collectAsState()
                 LaunchedEffect(hideNav) { applyFullscreen() }
                 val inSet = ui.project != null
@@ -45,6 +56,7 @@ class MainActivity : ComponentActivity() {
                     else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 }
                 if (inSet) StudioScreen(vm, ui, layout) else LibraryScreen(vm, ui, layout)
+                }
             }
         }
     }

@@ -13,6 +13,18 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntOffset
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -41,6 +53,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
@@ -172,9 +185,8 @@ private fun NoteGrid(
     cellH: Dp,
     noteLength: Double,
     rowBackground: (Int) -> Color,
-    vScroll: androidx.compose.foundation.ScrollState,
+    vp: ViewportState,
     modifier: Modifier = Modifier,
-    onZoom: ((Float) -> Unit)? = null,
 ) {
     val track = ui.track ?: return
     val clip = ui.clip
@@ -182,15 +194,18 @@ private fun NoteGrid(
     val length = clip?.lengthBeats ?: (ui.newClipBars * 4.0)
     val steps = max(1, kotlin.math.round(length / grid).toInt())
     val density = LocalDensity.current
-    val cw = with(density) { cellW.toPx() }
-    val ch = with(density) { cellH.toPx() }
+    val baseCw = with(density) { cellW.toPx() }
+    val baseCh = with(density) { cellH.toPx() }
+    SideEffect { vp.baseW = baseCw * steps; vp.baseH = baseCh * rows.size }
+    // Cell size at the current zoom; gesture handlers restart when it changes.
+    val cw = baseCw * vp.zoomX
+    val ch = baseCh * vp.zoomY
     val color = NM.track(track.color)
     val notes by rememberUpdatedState(clip?.notes ?: emptyList())
     val selection by rememberUpdatedState(ui.noteSelection)
     var marquee by remember { mutableStateOf<Rect?>(null) }
     var resizing by remember { mutableStateOf(false) }
     var mouseBusy by remember { mutableStateOf(false) }
-    val hScroll = rememberScrollState()
     val handlePx = with(density) { 16.dp.toPx() }
 
     /**
@@ -245,20 +260,21 @@ private fun NoteGrid(
         vm.padDown(pitch, 100); vm.padUp(pitch)
     }
 
-    Box(modifier.verticalScroll(vScroll).horizontalScroll(hScroll)) {
+    Box(modifier.clipToBounds().onSizeChanged { vp.viewW = it.width.toFloat(); vp.viewH = it.height.toFloat(); vp.scrollTo() }) {
         Canvas(
-            Modifier.size(cellW * steps, cellH * rows.size)
-                // Mouse wheel scrolls (Shift = sideways), Ctrl + wheel zooms in time.
-                .onWheel { d, mods ->
+            Modifier.fillMaxSize()
+                // Mouse wheel scrolls (Shift = sideways), Ctrl + wheel zooms in time around the cursor.
+                .onWheelAt { d, mods, pos ->
                     val stepPx = ch * 3
                     when {
-                        mods.isCommand -> onZoom?.invoke(if (d.y < 0) 1.15f else 1f / 1.15f)
-                        mods.isShiftPressed -> hScroll.dispatchRawDelta(d.y * stepPx)
-                        else -> { vScroll.dispatchRawDelta(d.y * stepPx); hScroll.dispatchRawDelta(d.x * stepPx) }
+                        mods.isCommand -> vp.zoomBy(if (d.y < 0) 1.15f else 1f / 1.15f, 1f, pos)
+                        mods.isShiftPressed -> vp.scrollBy(d.y * stepPx, 0f)
+                        else -> vp.scrollBy(d.x * stepPx, d.y * stepPx)
                     }
                 }
                 .pointerInput(steps, grid, rows, cw, ch) {
-                    detectTapGestures { o ->
+                    detectTapGestures { o0 ->
+                        val o = vp.toContent(o0)
                         val step = (o.x / cw).toInt()
                         val r = (o.y / ch).toInt()
                         if (r !in rows.indices || step !in 0 until steps) return@detectTapGestures
@@ -277,8 +293,9 @@ private fun NoteGrid(
                     var orig: List<Note> = emptyList()
                     var current: Set<Note> = emptySet()
                     detectDragGesturesAfterLongPress(
-                        onDragStart = { o ->
+                        onDragStart = { o0 ->
                             if (resizing || mouseBusy) { mode = 0; return@detectDragGesturesAfterLongPress }
+                            val o = vp.toContent(o0)
                             start = o; acc = Offset.Zero
                             val n = hit(o)
                             if (n != null) {
@@ -312,6 +329,8 @@ private fun NoteGrid(
                         }
                     }
                 }
+                // One finger drag on the grid pans (with fling); two fingers pinch-zoom (last modifier below).
+                .viewportPan(vp)
                 // Mouse: click empty = add a note (or deselect), click a note = select it (Shift/Ctrl = add to the
                 // selection), double-click a note = delete it, drag a note = move (Ctrl + drag = copy), drag empty
                 // space = box-select, right-click a note = add it to the selection.
@@ -327,7 +346,8 @@ private fun NoteGrid(
                         val secondary = currentEvent.buttons.isSecondaryPressed
                         down.consume()
                         mouseBusy = true
-                        val n = hit(down.position)
+                        val downPos = vp.toContent(down.position)
+                        val n = hit(downPos)
                         var mode = 0 // 1 = move, 2 = marquee
                         var acc = Offset.Zero
                         var orig: List<Note> = emptyList()
@@ -358,8 +378,8 @@ private fun NoteGrid(
                                     current = moved.toSet()
                                 }
                             } else if (mode == 2) {
-                                val p = down.position + acc
-                                marquee = Rect(min(down.position.x, p.x), min(down.position.y, p.y), max(down.position.x, p.x), max(down.position.y, p.y))
+                                val p = downPos + acc
+                                marquee = Rect(min(downPos.x, p.x), min(downPos.y, p.y), max(downPos.x, p.x), max(downPos.y, p.y))
                             }
                         }
                         when {
@@ -374,7 +394,7 @@ private fun NoteGrid(
                                     n != null && additive -> vm.toggleNoteSelection(n)
                                     n != null -> { vm.setNoteSelection(setOf(n)); vm.padDown(n.pitch, n.velocity); vm.padUp(n.pitch) }
                                     selection.isNotEmpty() && !additive -> vm.clearNoteSelection()
-                                    else -> addNoteAt(down.position)
+                                    else -> addNoteAt(downPos)
                                 }
                             }
                         }
@@ -388,7 +408,7 @@ private fun NoteGrid(
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         if (currentEvent.buttons.isSecondaryPressed) return@awaitEachGesture
-                        val (note, side) = handleHit(down.position) ?: return@awaitEachGesture
+                        val (note, side) = handleHit(vp.toContent(down.position)) ?: return@awaitEachGesture
                         down.consume()
                         resizing = true
                         val wasSelected = note in selection
@@ -399,6 +419,7 @@ private fun NoteGrid(
                         vm.checkpoint()
                         while (true) {
                             val ev = awaitPointerEvent()
+                            if (ev.changes.count { it.pressed } > 1) break // a second finger: pinch takes over
                             val c = ev.changes.firstOrNull { it.id == down.id } ?: break
                             if (!c.pressed) { c.consume(); break }
                             acc += c.positionChange().x
@@ -419,18 +440,37 @@ private fun NoteGrid(
                         }
                         resizing = false
                     }
-                },
+                }
+                .viewportPinch(vp),
         ) {
-            rows.forEachIndexed { r, p -> drawRect(rowBackground(p), Offset(0f, r * ch), Size(size.width, ch - 1f)) }
-            for (s in 0..steps) {
+            val contentW = cw * steps
+            val contentH = ch * rows.size
+            val sx = vp.scrollX
+            val sy = vp.scrollY
+            // Only what's on screen is drawn.
+            val r0 = (sy / ch).toInt().coerceIn(0, rows.size)
+            val r1 = ((sy + size.height) / ch).toInt().plus(1).coerceIn(0, rows.size)
+            val s0 = (sx / cw).toInt().coerceIn(0, steps)
+            val s1 = ((sx + size.width) / cw).toInt().plus(1).coerceIn(0, steps)
+            drawRect(NM.bg)
+            translate(-sx, -sy) {
+            for (r in r0 until r1) drawRect(rowBackground(rows[r]), Offset(sx, r * ch), Size(min(size.width, contentW - sx), ch - 1f))
+            val lineTop = max(0f, sy)
+            val lineBottom = min(contentH, sy + size.height)
+            for (s in s0..s1) {
                 val beat = s * grid
                 val strong = abs(beat % 4.0) < 1e-6
                 val medium = abs(beat % 1.0) < 1e-6
-                drawLine(if (strong) NM.textDim else if (medium) NM.line else NM.line.copy(alpha = 0.4f), Offset(s * cw, 0f), Offset(s * cw, size.height), if (strong) 2f else 1f)
+                // Thin out step lines when zoomed far out.
+                if (!strong && !medium && cw < 6f) continue
+                drawLine(if (strong) NM.textDim else if (medium) NM.line else NM.line.copy(alpha = 0.4f), Offset(s * cw, lineTop), Offset(s * cw, lineBottom), if (strong) 2f else 1f)
             }
+            val firstBeat = s0 * grid
+            val lastBeat = s1 * grid
             for (n in notes) {
+                if (n.end < firstBeat || n.start > lastBeat) continue
                 val r = rows.indexOf(n.pitch)
-                if (r < 0) continue
+                if (r < r0 - 1 || r > r1 || r < 0) continue
                 val x = (n.start / grid * cw).toFloat()
                 val w = max(cw * 0.5f, (n.duration / grid * cw).toFloat() - 2f)
                 val sel = n in selection
@@ -460,7 +500,8 @@ private fun NoteGrid(
             val head = playheadIn(engine.value, track, ui.selectedScene, clip)
             if (head != null) {
                 val x = (head / grid * cw).toFloat()
-                drawLine(Color.White, Offset(x, 0f), Offset(x, size.height), 3f)
+                drawLine(Color.White, Offset(x, lineTop), Offset(x, lineBottom), 3f)
+            }
             }
         }
     }
@@ -468,17 +509,15 @@ private fun NoteGrid(
 
 /** Drum step sequencer: one row per pad (pad 16 on top, like the pad grid). */
 @Composable
-fun DrumStepGrid(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, modifier: Modifier = Modifier, cell: Dp = 30.dp,
-                 cellW: Dp = cell, onZoom: ((Float) -> Unit)? = null) {
+fun DrumStepGrid(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, vp: ViewportState, modifier: Modifier = Modifier, cell: Dp = 30.dp) {
     val track = ui.track ?: return
     val rows = remember { (DRUM_PAD_COUNT - 1 downTo 0).map { DRUM_BASE_NOTE + it } }
-    val vScroll = rememberScrollState()
     Row(modifier) {
-        Column(Modifier.width(64.dp).verticalScroll(vScroll)) {
+        RowLabels(vp, Modifier.width(64.dp)) {
             for (pitch in rows) {
                 val pad = pitch - DRUM_BASE_NOTE
                 Box(
-                    Modifier.height(cell).fillMaxWidth()
+                    Modifier.height(cell * vp.zoomY).fillMaxWidth()
                         .background(if (pad == ui.selectedPad) NM.surfaceHigh else Color.Transparent)
                         .pointerInput(pad) { detectTapGestures { vm.selectPad(pad); vm.auditionPad(pad) } },
                     contentAlignment = Alignment.CenterStart,
@@ -488,16 +527,15 @@ fun DrumStepGrid(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, 
                 }
             }
         }
-        NoteGrid(vm, ui, engine, rows, cellW, cell, ui.stepGrid * 0.95, { p ->
+        NoteGrid(vm, ui, engine, rows, cell, cell, ui.stepGrid * 0.95, { p ->
             if (p - DRUM_BASE_NOTE == ui.selectedPad) NM.surfaceHigh else NM.pad.copy(alpha = 0.55f)
-        }, vScroll, Modifier.weight(1f), onZoom)
+        }, vp, Modifier.weight(1f))
     }
 }
 
 /** Piano roll. Rows are pitches (only in-scale rows when "In Key" is on). */
 @Composable
-fun NoteEditor(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, modifier: Modifier = Modifier, cellW: Dp = 28.dp, cellH: Dp = 26.dp,
-               onZoom: ((Float) -> Unit)? = null) {
+fun NoteEditor(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, vp: ViewportState, modifier: Modifier = Modifier, cellW: Dp = 28.dp, cellH: Dp = 26.dp) {
     val project = ui.project ?: return
     val track = ui.track ?: return
     val clip = ui.clip
@@ -507,19 +545,19 @@ fun NoteEditor(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, mo
     }
     val color = NM.track(track.color)
     val ch = with(LocalDensity.current) { cellH.toPx() }
-    val vScroll = rememberScrollState()
     LaunchedEffect(track.id, ui.selectedScene, rows.size) {
         val focus = clip?.notes?.maxByOrNull { it.pitch }?.pitch ?: ((ui.octave + 3) * 12 + project.rootNote)
         val idx = rows.indexOfFirst { it <= focus }.coerceAtLeast(0)
-        vScroll.scrollTo(max(0, ((idx - 3) * ch).toInt()))
+        vp.baseH = ch * rows.size
+        vp.scrollTo(y = max(0f, (idx - 3) * ch * vp.zoomY))
     }
     Row(modifier) {
-        Column(Modifier.width(44.dp).verticalScroll(vScroll)) {
+        RowLabels(vp, Modifier.width(44.dp)) {
             for (p in rows) {
                 val black = Scale.NOTE_NAMES[p % 12].contains('#')
                 val root = Math.floorMod(p - project.rootNote, 12) == 0
                 Box(
-                    Modifier.height(cellH).fillMaxWidth().background(if (root) color.copy(alpha = 0.35f) else if (black) NM.padDim else NM.surfaceHigh)
+                    Modifier.height(cellH * vp.zoomY).fillMaxWidth().background(if (root) color.copy(alpha = 0.35f) else if (black) NM.padDim else NM.surfaceHigh)
                         .pointerInput(p) { detectTapGestures(onPress = { vm.padDown(p, 100); tryAwaitRelease(); vm.padUp(p) }) },
                     contentAlignment = Alignment.CenterStart,
                 ) { Text(Scale.noteName(p), Modifier.padding(start = 4.dp), fontSize = 10.sp, color = NM.text) }
@@ -528,7 +566,15 @@ fun NoteEditor(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, mo
         NoteGrid(vm, ui, engine, rows, cellW, cellH, ui.stepGrid, { p ->
             val black = Scale.NOTE_NAMES[p % 12].contains('#')
             if (black && !inKey) NM.padDim else NM.pad.copy(alpha = 0.55f)
-        }, vScroll, Modifier.weight(1f), onZoom)
+        }, vp, Modifier.weight(1f))
+    }
+}
+
+/** Row names beside a grid: they follow the grid's vertical scroll and zoom, and can be dragged to scroll. */
+@Composable
+private fun RowLabels(vp: ViewportState, modifier: Modifier, content: @Composable () -> Unit) {
+    Box(modifier.fillMaxHeight().clipToBounds().viewportPan(vp, panX = false, requireUnconsumed = false).viewportPinch(vp, zoomX = false, pass = PointerEventPass.Initial)) {
+        Column(Modifier.wrapContentHeight(Alignment.Top, unbounded = true).offset { IntOffset(0, -vp.scrollY.roundToInt()) }) { content() }
     }
 }
 
@@ -536,23 +582,34 @@ fun NoteEditor(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, mo
 @Composable
 fun ClipEditor(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, modifier: Modifier = Modifier, compact: Boolean = false) {
     val track = ui.track ?: return
-    var zoom by remember { mutableFloatStateOf(1f) }
-    val onZoom: (Float) -> Unit = { f -> zoom = (zoom * f).coerceIn(0.4f, 3f) }
+    val drums = track.drumLayout
+    // One viewport per kind of editor; its zoom is remembered between sessions.
+    val zoomKey = if (drums) "zoom_drums" else "zoom_keys"
+    val splits by vm.splits.collectAsState()
+    val vp = remember(drums) {
+        ViewportState(zoomX = splits["${zoomKey}_x"] ?: 1f, zoomY = splits["${zoomKey}_y"] ?: 1f, minZoomY = if (drums) 0.6f else 0.5f)
+    }
+    LaunchedEffect(vp) {
+        snapshotFlow { vp.zoomX to vp.zoomY }.collectLatest { (zx, zy) ->
+            delay(600)
+            vm.setSplit("${zoomKey}_x", zx); vm.setSplit("${zoomKey}_y", zy)
+        }
+    }
     Column(modifier) {
         if (ui.noteSelection.isNotEmpty()) NoteSelectionBar(vm, ui) else ClipToolbar(vm, ui)
         Box(Modifier.weight(1f).fillMaxWidth().padding(top = 6.dp)) {
             if (track.drumLayout) {
                 BoxWithConstraints(Modifier.fillMaxSize()) {
                     val cell = ((maxHeight - 2.dp) / DRUM_PAD_COUNT).coerceIn(18.dp, if (compact) 30.dp else 40.dp)
-                    DrumStepGrid(vm, ui, engine, Modifier.fillMaxSize(), cell = cell, cellW = cell * zoom, onZoom = onZoom)
+                    DrumStepGrid(vm, ui, engine, vp, Modifier.fillMaxSize(), cell = cell)
                 }
             } else {
-                NoteEditor(vm, ui, engine, Modifier.fillMaxSize(), cellW = (if (compact) 26.dp else 32.dp) * zoom, onZoom = onZoom)
+                NoteEditor(vm, ui, engine, vp, Modifier.fillMaxSize(), cellW = if (compact) 26.dp else 32.dp)
             }
         }
         Text(
             if (ui.clip == null) "Empty slot: tap the grid to start a clip, or press Record."
-            else "Tap to add/remove · drag ▸ at a note's end to change its length (selected notes: ◂ ▸, all together) · hold a note to select & move · hold empty space to box-select · mouse: click, drag, double-click, Ctrl+wheel to zoom",
+            else "Tap to add/remove · drag ▸ at a note's end to change its length (selected notes: ◂ ▸, all together) · hold a note to select & move · hold empty space to box-select · drag to scroll, pinch to zoom (sideways = time, up/down = rows)",
             Modifier.padding(4.dp), fontSize = 11.sp, color = NM.textDim, fontWeight = FontWeight.Medium,
         )
     }

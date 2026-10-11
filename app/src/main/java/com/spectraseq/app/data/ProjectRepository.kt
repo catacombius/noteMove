@@ -14,7 +14,22 @@ import kotlinx.serialization.builtins.ListSerializer
 import com.spectraseq.core.model.newId
 import java.io.File
 
-data class ProjectSummary(val id: String, val name: String, val modifiedAt: Long, val tempo: Double, val tracks: Int, val clips: Int)
+data class ProjectSummary(
+    val id: String,
+    val name: String,
+    val modifiedAt: Long,
+    val tempo: Double,
+    val tracks: Int,
+    val clips: Int,
+    val rootNote: Int = 0,
+    val scale: String = "",
+    /** Track colour indices, for the thumbnail. */
+    val trackColors: List<Int> = emptyList(),
+    /** Scenes shown in the thumbnail (used ones, at most 8). */
+    val thumbScenes: Int = 0,
+    /** Filled thumbnail cells, as track * thumbScenes + scene. */
+    val thumbCells: Set<Int> = emptySet(),
+)
 
 /** Stores each project as `files/projects/<id>/project.json` plus its samples as WAV files. */
 class ProjectRepository(context: Context) {
@@ -30,7 +45,13 @@ class ProjectRepository(context: Context) {
         if (!f.exists()) return@mapNotNull null
         runCatching {
             val p = ProjectJson.decode(f.readText())
-            ProjectSummary(p.id, p.name, p.modifiedAt, p.tempo, p.tracks.size, p.tracks.sumOf { it.clips.size })
+            val scenes = (p.usedScenes().maxOrNull()?.plus(1) ?: 1).coerceIn(1, 8)
+            val cells = HashSet<Int>()
+            p.tracks.forEachIndexed { ti, t -> for (sc in 0 until scenes) if (t.clips[sc]?.notes?.isNotEmpty() == true) cells.add(ti * scenes + sc) }
+            ProjectSummary(
+                p.id, p.name, p.modifiedAt, p.tempo, p.tracks.size, p.tracks.sumOf { it.clips.size },
+                p.rootNote, p.scale.label, p.tracks.map { it.color }, scenes, cells,
+            )
         }.getOrNull()
     }.sortedByDescending { it.modifiedAt }
 

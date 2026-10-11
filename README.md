@@ -28,6 +28,9 @@ It's built for the **Samsung Galaxy Z Fold** family and works on any Android 10+
 | Effects | Live devices | Chains of up to 6 effects per track and on the master: Auto Filter (synced LFO), Saturator, Redux, Chorus, Phaser, Compressor, EQ Three, Auto Pan, Echo, Reverb |
 | Sample editing | — | **Spectral sample editor** (iZotope Iris-style): spectrogram, rectangle / brush / time selections, attenuate · erase · boost · keep-only in the frequency domain, plus trim, delete, reverse, fades, normalise, gain, preview and undo |
 | Layout | — | Resizable areas: drag the dividers between session/editor, pads and step strip (remembered per screen) |
+| Zoom & scroll | — | Piano roll and drum grid scroll freely in both directions with fling; pinch to zoom (sideways = time, up/down = rows), remembered per editor. Pinch the step sequencer to change step size (1/4 … 1/32) like Push. Session grid pans diagonally; pinch to resize clip slots |
+| Look | — | Five dark themes (Ember, Midnight, Neon, OLED, Graphite), any accent colour, three track-colour sets, and an interface-size setting per screen (cover / inner). Redesigned faders with LED meters and peak hold |
+| Start screen | Set browser | New sketch in one tap or from a template (Beat, Empty, Slice a loop, General MIDI); recent sets with clip-grid thumbnails, search and sorting |
 | Touch & hold | — | Options on clips, scenes, tracks, pads, notes, effects, knobs and sets; multi-select clips (copy, paste, duplicate, quantize, launch, delete), notes (move by dragging, box-select, transpose, velocity, length, legato…) and sets |
 | Undo | ✓ | Undo / redo |
 | To Live | Ableton Cloud / Move Manager | **Export a zipped Live project** or just the `.als` via the share sheet or save to a folder; **open `.als` files** from Live |
