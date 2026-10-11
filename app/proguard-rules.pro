@@ -3,9 +3,9 @@
 -dontnote kotlinx.serialization.**
 -keepclassmembers class kotlinx.serialization.json.** { *** Companion; }
 -keepclasseswithmembers class kotlinx.serialization.json.** { kotlinx.serialization.KSerializer serializer(...); }
--keep,includedescriptorclasses class com.notemove.app.**$$serializer { *; }
--keepclassmembers class com.notemove.app.** { *** Companion; }
--keepclasseswithmembers class com.notemove.app.** { kotlinx.serialization.KSerializer serializer(...); }
--keep,includedescriptorclasses class com.notemove.core.**$$serializer { *; }
--keepclassmembers class com.notemove.core.** { *** Companion; }
--keepclasseswithmembers class com.notemove.core.** { kotlinx.serialization.KSerializer serializer(...); }
+-keep,includedescriptorclasses class com.spectraseq.app.**$$serializer { *; }
+-keepclassmembers class com.spectraseq.app.** { *** Companion; }
+-keepclasseswithmembers class com.spectraseq.app.** { kotlinx.serialization.KSerializer serializer(...); }
+-keep,includedescriptorclasses class com.spectraseq.core.**$$serializer { *; }
+-keepclassmembers class com.spectraseq.core.** { *** Companion; }
+-keepclasseswithmembers class com.spectraseq.core.** { kotlinx.serialization.KSerializer serializer(...); }

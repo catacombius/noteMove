@@ -6,13 +6,13 @@ plugins {
 }
 
 android {
-    namespace = "com.notemove.app"
-    compileSdk = 35
+    namespace = "com.spectraseq.app"
+    compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.notemove.app"
+        applicationId = "com.spectraseq.app"
         minSdk = 29
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
         vectorDrawables { useSupportLibrary = true }
