@@ -4,6 +4,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.hardware.input.InputManager
+import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.WindowManager
@@ -22,6 +24,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.spectraseq.app.app
 import com.spectraseq.app.input.TrackpadGestures
+import com.spectraseq.app.ui.components.LocalWorkspace
 import com.spectraseq.app.ui.components.displayName
 import com.spectraseq.app.ui.screens.LibraryScreen
 import com.spectraseq.app.ui.screens.StudioScreen
@@ -59,12 +62,16 @@ class MainActivity : ComponentActivity() {
                 val ui by vm.ui.collectAsState()
                 val raw = rememberDeviceLayout(this)
                 // Interface size: a separate scale for the cover and the inner screen, applied by scaling density.
-                val scale = (if (raw.mode == DeviceLayout.Mode.COVER) UiScale.cover else UiScale.inner).coerceIn(0.7f, 1.6f)
+                val scale = when {
+                    ui.workspace == Workspace.DESKTOP -> UiScale.desktop
+                    raw.mode == DeviceLayout.Mode.COVER -> UiScale.cover
+                    else -> UiScale.inner
+                }.coerceIn(0.6f, 1.6f)
                 val base = LocalDensity.current
                 // Touchpad scrolling stays 1:1 with the fingers at any interface size.
                 trackpad.notchPx = TrackpadGestures.NOTCH_DP * base.density * scale
                 val fontScale = base.fontScale.coerceAtMost(UiScale.MAX_SYSTEM_FONT) * UiScale.text.coerceIn(0.8f, 1.3f)
-                CompositionLocalProvider(LocalDensity provides Density(base.density * scale, fontScale)) {
+                CompositionLocalProvider(LocalDensity provides Density(base.density * scale, fontScale), LocalWorkspace provides ui.workspace) {
                 val layout = raw.scaled(scale)
                 val hideNav by vm.hideNavBar.collectAsState()
                 LaunchedEffect(hideNav) { applyFullscreen() }
@@ -114,10 +121,30 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         app.output.start()
+        val im = getSystemService(InputManager::class.java)
+        im.registerInputDeviceListener(pointerDevices, null)
+        if (im.inputDeviceIds.any { isMouse(im.getInputDevice(it)) }) vm.onMouseConnected()
+    }
+
+    /** Offers the keyboard & mouse workspace when a mouse or touchpad connects. */
+    private val pointerDevices = object : InputManager.InputDeviceListener {
+        override fun onInputDeviceAdded(id: Int) {
+            if (isMouse(getSystemService(InputManager::class.java).getInputDevice(id))) vm.onMouseConnected()
+        }
+        override fun onInputDeviceRemoved(id: Int) = Unit
+        override fun onInputDeviceChanged(id: Int) = Unit
+    }
+
+    private fun isMouse(d: InputDevice?): Boolean {
+        if (d == null || d.isVirtual) return false
+        if (d.supportsSource(InputDevice.SOURCE_TOUCHPAD)) return true
+        // Some phones expose internal sensors as mice; only count external ones.
+        return d.supportsSource(InputDevice.SOURCE_MOUSE) && (Build.VERSION.SDK_INT < 29 || d.isExternal)
     }
 
     override fun onStop() {
         super.onStop()
+        getSystemService(InputManager::class.java).unregisterInputDeviceListener(pointerDevices)
         vm.flushSave()
         // Keep playing in the background only while the transport runs (e.g. jamming with the screen off).
         if (!app.engine.state.playing && !isChangingConfigurations) app.output.stop()

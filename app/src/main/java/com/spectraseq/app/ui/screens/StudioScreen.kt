@@ -89,6 +89,12 @@ fun StudioScreen(vm: StudioViewModel, ui: StudioUi, layout: DeviceLayout) {
     LaunchedEffect(ui.message) {
         ui.message?.let { snackbar.showSnackbar(it); vm.clearMessage() }
     }
+    // A mouse or touchpad was connected: offer the keyboard & mouse workspace.
+    LaunchedEffect(ui.suggestDesktop) {
+        if (!ui.suggestDesktop) return@LaunchedEffect
+        val r = snackbar.showSnackbar("Mouse or touchpad connected", actionLabel = "Desktop layout", withDismissAction = true, duration = androidx.compose.material3.SnackbarDuration.Long)
+        if (r == androidx.compose.material3.SnackbarResult.ActionPerformed) vm.setWorkspace(com.spectraseq.app.ui.Workspace.DESKTOP) else vm.dismissDesktopSuggestion()
+    }
     // Sheets requested from the keyboard (Ctrl+E, Ctrl+,).
     val overlay by vm.overlayRequest.collectAsState()
     LaunchedEffect(overlay) {
@@ -125,7 +131,8 @@ fun StudioScreen(vm: StudioViewModel, ui: StudioUi, layout: DeviceLayout) {
     )
 
     Box(Modifier.fillMaxSize().background(NM.bg)) {
-        when (layout.mode) {
+        if (ui.workspace == com.spectraseq.app.ui.Workspace.DESKTOP) DesktopLayout(vm, ui, engine, actions)
+        else when (layout.mode) {
             DeviceLayout.Mode.COVER -> if (layout.wideCover) SplitLayout(vm, ui, engine, actions, layout, horizontal = true) else CoverLayout(vm, ui, engine, actions)
             DeviceLayout.Mode.SPREAD -> SplitLayout(vm, ui, engine, actions, layout, horizontal = layout.landscape)
             DeviceLayout.Mode.TABLETOP -> TabletopLayout(vm, ui, engine, actions, layout)
@@ -142,7 +149,7 @@ fun StudioScreen(vm: StudioViewModel, ui: StudioUi, layout: DeviceLayout) {
     editTrackId?.let { id -> ui.project?.track(id)?.let { TrackDialog(vm, it) { editTrackId = null } } ?: run { editTrackId = null } }
 }
 
-private class StudioActions(
+internal class StudioActions(
     val onSettings: () -> Unit,
     val onExport: () -> Unit,
     val onSample: () -> Unit,

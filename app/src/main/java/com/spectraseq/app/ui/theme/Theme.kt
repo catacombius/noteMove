@@ -119,6 +119,8 @@ object UiScale {
     var inner by mutableFloatStateOf(1f)
     /** Text size on top of the interface size (the system font size is capped at 115 % so labels fit their controls). */
     var text by mutableFloatStateOf(1f)
+    /** Interface size in the keyboard & mouse workspace (denser by default, like a desktop app). */
+    var desktop by mutableFloatStateOf(0.9f)
     const val MAX_SYSTEM_FONT = 1.15f
 }
 
@@ -134,6 +136,7 @@ object Appearance {
         UiScale.cover = p.getFloat("ui_scale_cover", 1f)
         UiScale.inner = p.getFloat("ui_scale_inner", 1f)
         UiScale.text = p.getFloat("ui_scale_text", 1f)
+        UiScale.desktop = p.getFloat("ui_scale_desktop", 0.9f)
     }
 
     fun save(context: Context) {
@@ -144,6 +147,7 @@ object Appearance {
             putFloat("ui_scale_cover", UiScale.cover)
             putFloat("ui_scale_inner", UiScale.inner)
             putFloat("ui_scale_text", UiScale.text)
+            putFloat("ui_scale_desktop", UiScale.desktop)
         }.apply()
     }
 }

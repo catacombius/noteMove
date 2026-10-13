@@ -66,6 +66,9 @@ enum class RowLayout(val label: String, val inKeySteps: Int, val semitones: Int)
 /** Sheets the keyboard can open (Ctrl+E, Ctrl+,). */
 enum class Overlay { SETTINGS, EXPORT, SAMPLE }
 
+/** How the studio is laid out: for fingers (pads, tabs, gestures) or for a keyboard and mouse (desktop-style). */
+enum class Workspace(val label: String) { TOUCH("Touch"), DESKTOP("Keyboard & mouse") }
+
 /** Live-style computer MIDI keyboard: [octave] is where the A key sits on melodic tracks (C3 = middle C), [drumOctave] on drums. */
 data class ComputerKeys(val enabled: Boolean = true, val octave: Int = 3, val drumOctave: Int = 1, val velocity: Int = 100)
 
@@ -120,10 +123,21 @@ data class StudioUi(
     val songCursor: Double = 0.0,
     /** Session clip launches are being recorded into the song. */
     val songRecordArmed: Boolean = false,
+    val workspace: Workspace = Workspace.TOUCH,
+    /** Keyboard & mouse workspace: the main view (Session / Song / Mix) and the detail views below it. */
+    val deskMain: Panel = Panel.SESSION,
+    val deskEditor: Panel = Panel.EDIT,
+    val deskDevice: Panel = Panel.SOUND,
+    /** On narrow windows the detail area shows one view: the device (true) or the editor. */
+    val deskDeviceFocus: Boolean = false,
+    /** A mouse was connected while in the touch workspace: offer to switch. */
+    val suggestDesktop: Boolean = false,
 ) {
     val track: Track? get() = project?.tracks?.firstOrNull { it.id == selectedTrackId } ?: project?.tracks?.firstOrNull()
     val editingSongClip: SongClip? get() = editingSongClipId?.let { id -> project?.arrangement?.clips?.firstOrNull { it.id == id } }
     val clip: Clip? get() = editingSongClip?.clip ?: track?.clips?.get(selectedScene)
+    /** Whether Space and the edit shortcuts act on the song (the Song view is in front). */
+    val songContext: Boolean get() = if (workspace == Workspace.DESKTOP) deskMain == Panel.SONG else panel == Panel.SONG
 }
 
 sealed interface ExportState {
@@ -250,14 +264,14 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         }
         undo.clear(); redo.clear()
         engine.setProject(p)
-        _ui.value = StudioUi(project = p, selectedTrackId = p.tracks.firstOrNull()?.id, metronome = _ui.value.metronome, countIn = _ui.value.countIn)
+        _ui.value = StudioUi(project = p, selectedTrackId = p.tracks.firstOrNull()?.id, metronome = _ui.value.metronome, countIn = _ui.value.countIn, workspace = _ui.value.workspace, suggestDesktop = _ui.value.suggestDesktop)
         engine.metronomeEnabled = _ui.value.metronome
     }
 
     fun closeProject() {
         engine.stop()
         flushSave()
-        _ui.value = StudioUi()
+        _ui.value = StudioUi(workspace = _ui.value.workspace, suggestDesktop = _ui.value.suggestDesktop)
         refreshLibrary()
     }
 
@@ -361,12 +375,28 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     fun selectScene(scene: Int) = _ui.update { it.copy(selectedScene = scene, stepPage = 0, noteSelection = emptySet(), editingSongClipId = null) }
     fun selectPad(pad: Int) = _ui.update { it.copy(selectedPad = pad) }
-    fun setPanel(p: Panel) = _ui.update { it.copy(panel = p) }
+    fun setPanel(p: Panel) = _ui.update {
+        when (p) {
+            Panel.SESSION, Panel.SONG, Panel.MIX -> it.copy(panel = p, deskMain = p)
+            Panel.EDIT, Panel.PLAY -> it.copy(panel = p, deskEditor = p, deskDeviceFocus = false)
+            Panel.SOUND, Panel.FX -> it.copy(panel = p, deskDevice = p, deskDeviceFocus = true)
+        }
+    }
 
-    /** Next / previous view (Tab, three-finger touchpad swipe). */
+    /** Next / previous view (Tab, three-finger touchpad swipe). In the keyboard & mouse workspace: Session ↔ Song. */
     fun cyclePanel(direction: Int) {
+        val s = _ui.value
+        if (s.workspace == Workspace.DESKTOP) {
+            val mains = listOf(Panel.SESSION, Panel.SONG, Panel.MIX)
+            return setPanel(mains[Math.floorMod(mains.indexOf(s.deskMain) + direction, mains.size)])
+        }
         val all = Panel.entries
-        setPanel(all[Math.floorMod(all.indexOf(_ui.value.panel) + direction, all.size)])
+        setPanel(all[Math.floorMod(all.indexOf(s.panel) + direction, all.size)])
+    }
+
+    /** Keyboard & mouse workspace: Shift+Tab flips the detail area between the clip and the device (like Live). */
+    fun toggleDeskDetail() = _ui.update { s ->
+        if (s.deskDeviceFocus) s.copy(deskDeviceFocus = false, panel = s.deskEditor) else s.copy(deskDeviceFocus = true, panel = s.deskDevice)
     }
     fun setOctave(o: Int) = _ui.update { it.copy(octave = o.coerceIn(-1, 7)) }
     fun toggleInKey() = _ui.update { it.copy(inKey = !it.inKey) }
@@ -1380,6 +1410,42 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         _hideNavBar.value = on
         settings.edit().putBoolean("hide_nav", on).apply()
     }
+
+    // ------------------------------------------------------------------ workspace
+
+    init {
+        val w = Workspace.entries.firstOrNull { it.name == settings.getString("workspace", null) } ?: Workspace.TOUCH
+        _ui.update { it.copy(workspace = w) }
+    }
+
+    private val _suggestOnMouse = MutableStateFlow(settings.getBoolean("suggest_desktop", true))
+    val suggestOnMouse: StateFlow<Boolean> = _suggestOnMouse.asStateFlow()
+    private var suggestedThisRun = false
+
+    fun setWorkspace(w: Workspace) {
+        _ui.update { it.copy(workspace = w, suggestDesktop = false) }
+        settings.edit().putString("workspace", w.name).apply()
+    }
+
+    fun toggleWorkspace() {
+        val next = if (_ui.value.workspace == Workspace.TOUCH) Workspace.DESKTOP else Workspace.TOUCH
+        setWorkspace(next)
+        toast(if (next == Workspace.DESKTOP) "Keyboard & mouse workspace (Ctrl+Shift+W to switch back)" else "Touch workspace")
+    }
+
+    fun setSuggestOnMouse(on: Boolean) {
+        _suggestOnMouse.value = on
+        settings.edit().putBoolean("suggest_desktop", on).apply()
+    }
+
+    /** A mouse or touchpad is connected: offer the keyboard & mouse workspace once per run. */
+    fun onMouseConnected() {
+        if (suggestedThisRun || !_suggestOnMouse.value || _ui.value.workspace == Workspace.DESKTOP) return
+        suggestedThisRun = true
+        _ui.update { it.copy(suggestDesktop = true) }
+    }
+
+    fun dismissDesktopSuggestion() = _ui.update { it.copy(suggestDesktop = false) }
 
     // ------------------------------------------------------------------ keyboard & overlays
 

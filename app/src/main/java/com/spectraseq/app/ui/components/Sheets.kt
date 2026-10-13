@@ -126,6 +126,7 @@ fun SettingsSheet(vm: StudioViewModel, ui: StudioUi, onDismiss: () -> Unit) {
                 Checkbox(hideNav, { vm.setHideNavBar(it) })
                 Text("Also hide the navigation bar (swipe from the edge to show it)", fontSize = 13.sp, color = NM.text)
             }
+            WorkspaceSection(vm, ui.workspace)
             AppearanceSection()
             AudioSection(vm)
             KeyboardMouseSection(vm)
@@ -141,6 +142,8 @@ fun AppSettingsSheet(vm: StudioViewModel, onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = NM.surface) {
         Column(Modifier.padding(horizontal = 20.dp).verticalScroll(rememberScrollState()).navigationBarsPadding()) {
             Text("Settings", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = NM.text)
+            val appUi by vm.ui.collectAsState()
+            WorkspaceSection(vm, appUi.workspace)
             AppearanceSection()
             SectionTitle("MIDI controllers")
             BleMidiSection(vm)

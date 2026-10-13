@@ -676,8 +676,10 @@ fun ClipEditor(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, mo
                 NoteEditor(vm, ui, engine, vp, Modifier.fillMaxSize(), cellW = if (compact) 26.dp else 32.dp)
             }
         }
+        val desktop = LocalWorkspace.current == com.spectraseq.app.ui.Workspace.DESKTOP
         Text(
-            if (ui.clip == null) "Empty slot: tap the grid to start a clip, or press Record."
+            if (ui.clip == null) (if (desktop) "Empty slot: click the grid to start a clip, or press F9 to record." else "Empty slot: tap the grid to start a clip, or press Record.")
+            else if (desktop) "Click to add · double-click to delete · drag to move (Ctrl copies) · drag ▸ to resize · drag empty space to select · right-click for options · Ctrl+wheel zooms"
             else "Tap to add/remove · drag ▸ at a note's end to change its length (selected notes: ◂ ▸, all together) · hold a note to select & move · hold empty space to box-select · drag to scroll, pinch to zoom (sideways = time, up/down = rows)",
             Modifier.padding(4.dp), fontSize = 11.sp, color = NM.textDim, fontWeight = FontWeight.Medium,
         )

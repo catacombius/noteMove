@@ -54,6 +54,7 @@ class KeyboardShortcuts(private val vm: StudioViewModel, private val back: () ->
                 KeyEvent.KEYCODE_T -> { { vm.addTrack(if (shift) TrackKind.DRUMS else TrackKind.SYNTH) } }
                 KeyEvent.KEYCODE_E -> { { vm.requestOverlay(Overlay.EXPORT) } }
                 KeyEvent.KEYCODE_COMMA -> { { vm.requestOverlay(Overlay.SETTINGS) } }
+                KeyEvent.KEYCODE_W -> if (shift) vm::toggleWorkspace else return false
                 else -> return false
             }
             val repeatable = e.keyCode == KeyEvent.KEYCODE_Z || e.keyCode == KeyEvent.KEYCODE_Y
@@ -62,11 +63,15 @@ class KeyboardShortcuts(private val vm: StudioViewModel, private val back: () ->
         }
 
         when (e.keyCode) {
-            KeyEvent.KEYCODE_SPACE -> { if (first) { if (ui.panel == Panel.SONG) vm.toggleSongPlay() else vm.togglePlay() }; return true }
+            KeyEvent.KEYCODE_SPACE -> { if (first) { if (ui.songContext) vm.toggleSongPlay() else vm.togglePlay() }; return true }
             KeyEvent.KEYCODE_F9 -> { if (first) { if (shift) vm.toggleSongRecord() else vm.toggleRecord() }; return true }
             KeyEvent.KEYCODE_DEL, KeyEvent.KEYCODE_FORWARD_DEL -> { if (first) delete(); return true }
             KeyEvent.KEYCODE_TAB -> {
-                if (first) vm.cyclePanel(if (shift) -1 else 1)
+                if (first) {
+                    // Keyboard & mouse workspace, like Live: Tab = Session ↔ Song, Shift+Tab = clip ↔ device.
+                    if (ui.workspace == Workspace.DESKTOP) { if (shift) vm.toggleDeskDetail() else vm.cyclePanel(1) }
+                    else vm.cyclePanel(if (shift) -1 else 1)
+                }
                 return true
             }
             KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
@@ -130,7 +135,7 @@ class KeyboardShortcuts(private val vm: StudioViewModel, private val back: () ->
     private fun duplicate() {
         val ui = vm.ui.value
         when {
-            ui.panel == Panel.SONG && ui.songSelection.isNotEmpty() -> vm.duplicateSongSelection()
+            ui.songContext && ui.songSelection.isNotEmpty() -> vm.duplicateSongSelection()
             ui.noteSelection.isNotEmpty() -> vm.duplicateSelectedNotes()
             ui.clipSelection.isNotEmpty() -> vm.duplicateSelectedClips()
             else -> ui.track?.let { vm.duplicateClip(it.id, ui.selectedScene) }
@@ -140,7 +145,7 @@ class KeyboardShortcuts(private val vm: StudioViewModel, private val back: () ->
     private fun delete() {
         val ui = vm.ui.value
         when {
-            ui.panel == Panel.SONG && ui.songSelection.isNotEmpty() -> vm.deleteSongSelection()
+            ui.songContext && ui.songSelection.isNotEmpty() -> vm.deleteSongSelection()
             ui.noteSelection.isNotEmpty() -> vm.deleteSelectedNotes()
             ui.clipSelection.isNotEmpty() -> vm.deleteSelectedClips()
         }
@@ -200,7 +205,8 @@ class KeyboardShortcuts(private val vm: StudioViewModel, private val back: () ->
             "Space" to "Play / stop (the song when the Song view is open)",
             "F9 / Shift+F9" to "Record / record to song",
             "Enter / Shift+Enter" to "Launch clip / launch scene",
-            "Tab / Shift+Tab" to "Next / previous view",
+            "Tab / Shift+Tab" to "Next / previous view (keyboard & mouse workspace: Session ↔ Song / clip ↔ device)",
+            "Ctrl+Shift+W" to "Switch between the touch and keyboard & mouse workspaces",
             "← → ↑ ↓" to "Track / scene — with notes selected: move and transpose (Shift: length / octave)",
             "Delete / Backspace" to "Delete selected notes or clips",
             "Ctrl+Z / Ctrl+Shift+Z" to "Undo / redo",

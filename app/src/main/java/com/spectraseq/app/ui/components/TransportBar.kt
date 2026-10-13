@@ -153,7 +153,7 @@ private fun TransportBarContent(
         // Touch & hold / right-click the transport buttons for more ways to play and record.
         val playMenu = rememberContextMenu()
         Box(Modifier.menuAnchor(playMenu)) {
-            RoundButton(if (playing) NM.play else NM.surfaceHigh, onClick = { if (ui.panel == com.spectraseq.app.ui.Panel.SONG) vm.toggleSongPlay() else vm.togglePlay() },
+            RoundButton(if (playing) NM.play else NM.surfaceHigh, onClick = { if (ui.songContext) vm.toggleSongPlay() else vm.togglePlay() },
                 onLongClick = { playMenu.showBelow() }) {
                 Icon(if (playing) Icons.Filled.Stop else Icons.Filled.PlayArrow, if (playing) "Stop" else "Play", tint = if (playing) Color.Black else NM.text)
             }
@@ -190,12 +190,16 @@ private fun TransportBarContent(
                 }
             }
         }
-        if (!compact) IconButton(onClick = onExport) { Icon(Icons.Filled.IosShare, "Export to Live", tint = NM.text) }
+        if (!compact) {
+            WorkspaceToggleButton(vm, ui.workspace)
+            IconButton(onClick = onExport) { Icon(Icons.Filled.IosShare, "Export to Live", tint = NM.text) }
+        }
         Box {
             IconButton(onClick = { more = true }) { Icon(Icons.Filled.MoreVert, "More", tint = NM.text) }
             DropdownMenu(more, { more = false }) {
                 DropdownMenuItem({ Text("Export to Ableton Live…") }, { more = false; onExport() })
                 DropdownMenuItem({ Text("Set settings…") }, { more = false; onSettings() })
+                DropdownMenuItem({ Text(if (ui.workspace == com.spectraseq.app.ui.Workspace.TOUCH) "Keyboard & mouse workspace" else "Touch workspace") }, { more = false; vm.toggleWorkspace() })
                 if (compact) {
                     DropdownMenuItem({ Text("Undo") }, { more = false; vm.undo() }, enabled = ui.canUndo)
                     DropdownMenuItem({ Text("Redo") }, { more = false; vm.redo() }, enabled = ui.canRedo)

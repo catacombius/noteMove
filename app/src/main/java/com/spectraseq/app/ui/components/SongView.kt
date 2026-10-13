@@ -136,6 +136,7 @@ fun SongView(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, modi
         }
         Text(
             if (arr.isEmpty) "Empty song. Arm Rec, then launch clips or scenes in Session — or use \"Scenes → song\"."
+            else if (LocalWorkspace.current == com.spectraseq.app.ui.Workspace.DESKTOP) "Click selects (Shift adds) · drag moves · drag edges to resize · drag empty space to select · right-click for options · Ctrl+wheel zooms"
             else "Tap a clip to select · hold to add · hold & drag to move · drag edges to resize · tap the ruler for the cursor, drag it for the loop · pinch to zoom",
             Modifier.padding(4.dp), fontSize = 11.sp, color = NM.textDim,
         )
