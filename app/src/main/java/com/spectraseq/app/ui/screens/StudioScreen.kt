@@ -56,7 +56,6 @@ import com.spectraseq.app.ui.components.Chip
 import com.spectraseq.app.ui.components.ContextMenuPopup
 import com.spectraseq.app.ui.components.menuAnchor
 import com.spectraseq.app.ui.components.rememberContextMenu
-import com.spectraseq.app.ui.components.showBelow
 import com.spectraseq.app.ui.components.trackMenu
 import com.spectraseq.app.ui.components.EffectsPanel
 import com.spectraseq.app.ui.components.SampleEditor

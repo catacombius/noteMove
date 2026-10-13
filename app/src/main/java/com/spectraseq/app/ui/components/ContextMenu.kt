@@ -2,6 +2,7 @@ package com.spectraseq.app.ui.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.padding
@@ -170,7 +171,7 @@ fun Modifier.contextMenu(state: ContextMenuState, hold: Boolean = true): Modifie
     .onSizeChanged { state.anchorH = it.height.toFloat() }
     .onSecondaryClick { state.show(it) }
     .then(if (hold) Modifier.pointerInput(state) {
-        androidx.compose.foundation.gestures.detectTapGestures(onLongPress = { state.show(it) })
+        detectTapGestures(onLongPress = { state.show(it) })
     } else Modifier)
 
 /** Lets [showBelow] know the anchor's height. */
