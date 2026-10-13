@@ -117,13 +117,15 @@ fun RackEditor(vm: StudioViewModel, ui: StudioUi, target: FxTarget, slotId: Stri
     }
 
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        DialogTrackpad()
         Column(Modifier.fillMaxSize().background(NM.bg).safeDrawingPadding().padding(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            AdaptiveBar(leading = {
                 IconButton(onClose) { Icon(Icons.Filled.Close, "Done", tint = NM.text) }
                 Column(Modifier.weight(1f).clickable { renaming = -1 }) {
                     Text(rack.name, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = NM.text)
                     Text("Rack · tap the name to rename", fontSize = 11.sp, color = NM.textDim)
                 }
+            }, actions = {
                 Box {
                     TextButton({ startMenu = true }) { Text("Start from…") }
                     DropdownMenu(startMenu, { startMenu = false }) {
@@ -135,7 +137,7 @@ fun RackEditor(vm: StudioViewModel, ui: StudioUi, target: FxTarget, slotId: Stri
                 }
                 TextButton({ vm.saveRackToLibrary(rack.copy(macroValues = slot.values)) }) { Text("Save to library") }
                 TextButton(onClose) { Text("Done") }
-            }
+            })
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                 // Macros
                 SectionTitle(if (mapTo is MapTo.Macro) "Macros · now tap knob names below to map Macro ${(mapTo as MapTo.Macro).index + 1}" else "Macros")
@@ -184,7 +186,13 @@ fun RackEditor(vm: StudioViewModel, ui: StudioUi, target: FxTarget, slotId: Stri
                     DropdownMenu(addMenu, { addMenu = false }) {
                         for ((cat, types) in EffectType.BUILT_IN.groupBy { it.category }) {
                             Text(cat.label.uppercase(), fontSize = 10.sp, color = NM.textDim, modifier = Modifier.padding(start = 12.dp, top = 8.dp))
-                            for (t in types) DropdownMenuItem({ Text(t.label) }, { addMenu = false; set { r -> r.copy(chain = r.chain + EffectSlot(type = t)) } })
+                            for (t in types) DropdownMenuItem({
+                                Column(Modifier.padding(vertical = 4.dp)) {
+                                    Text(t.label, fontSize = 14.sp, color = NM.text)
+                                    Text(com.spectraseq.core.model.DeviceHelp.effect(t), fontSize = 11.sp, color = NM.textDim, maxLines = 2,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, lineHeight = 14.sp)
+                                }
+                            }, { addMenu = false; set { r -> r.copy(chain = r.chain + EffectSlot(type = t)) } })
                         }
                     }
                 }
@@ -301,6 +309,7 @@ private fun ModulatorCard(mod: Modulator, index: Int, color: androidx.compose.ui
             Chip(if (mapping) "Done mapping" else "Map (${mod.targets.size})", mapping, onMap, color = NM.accent)
             Chip("✕", false, onRemove, color = NM.record)
         }
+        Text(com.spectraseq.core.model.DeviceHelp.modulator(mod.kind), fontSize = 11.sp, color = NM.textDim, modifier = Modifier.padding(top = 2.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
             val msLabel: (Float) -> String = { v -> "${((0.02f + v * 1.5f) * 1000).toInt()} ms" }
             val syncLabel: (Float) -> String = { v -> syncDivision(v).second }

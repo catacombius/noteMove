@@ -66,10 +66,7 @@ class KeyboardShortcuts(private val vm: StudioViewModel, private val back: () ->
             KeyEvent.KEYCODE_F9 -> { if (first) { if (shift) vm.toggleSongRecord() else vm.toggleRecord() }; return true }
             KeyEvent.KEYCODE_DEL, KeyEvent.KEYCODE_FORWARD_DEL -> { if (first) delete(); return true }
             KeyEvent.KEYCODE_TAB -> {
-                if (first) {
-                    val all = Panel.entries
-                    vm.setPanel(all[Math.floorMod(all.indexOf(ui.panel) + if (shift) -1 else 1, all.size)])
-                }
+                if (first) vm.cyclePanel(if (shift) -1 else 1)
                 return true
             }
             KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
@@ -223,6 +220,9 @@ class KeyboardShortcuts(private val vm: StudioViewModel, private val back: () ->
             "Wheel in the editor" to "Scroll (Shift = sideways, Ctrl = zoom)",
             "Click / drag in the editor" to "Add or select notes / move them (Ctrl+drag copies), drag empty space to box-select",
             "Double-click a note" to "Delete it",
+            "Two-finger scroll (touchpad)" to "Scroll anywhere, with momentum (Ctrl = zoom)",
+            "Pinch (touchpad)" to "Zoom the editor, song and patcher",
+            "Two-finger click / tap" to "Right-click: context menu",
         )
 
         fun octaveLabel(baseNote: Int) = Scale.noteName(baseNote)

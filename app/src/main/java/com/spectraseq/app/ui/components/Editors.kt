@@ -54,8 +54,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -207,6 +209,12 @@ private fun NoteGrid(
     var resizing by remember { mutableStateOf(false) }
     var mouseBusy by remember { mutableStateOf(false) }
     val handlePx = with(density) { 16.dp.toPx() }
+    val notchPx = with(density) { wheelNotchDp.dp.toPx() }
+    // Context menu (touch & hold and release without dragging, or right-click): the note under it, or empty space.
+    val gridMenu = rememberContextMenu()
+    var menuNote by remember { mutableStateOf<Note?>(null) }
+    var menuAt by remember { mutableStateOf(Offset.Zero) }
+    fun openMenu(note: Note?, content: Offset, view: Offset) { menuNote = note; menuAt = content; gridMenu.show(view) }
 
     /**
      * Finds the length handle under [o]: +1 = right edge (every note), -1 = left edge (selected notes).
@@ -260,16 +268,17 @@ private fun NoteGrid(
         vm.padDown(pitch, 100); vm.padUp(pitch)
     }
 
-    Box(modifier.clipToBounds().onSizeChanged { vp.viewW = it.width.toFloat(); vp.viewH = it.height.toFloat(); vp.scrollTo() }) {
+    Box(modifier.clipToBounds().onSizeChanged { vp.viewW = it.width.toFloat(); vp.viewH = it.height.toFloat(); vp.scrollTo(); gridMenu.anchorH = it.height.toFloat() }) {
+        ContextMenuPopup(gridMenu) { noteGridMenu(vm, ui, menuNote, drums = track.drumLayout, onAddHere = { addNoteAt(menuAt) }, onFit = { vp.setZoom(x = vp.viewW / max(1f, vp.baseW)); vp.scrollTo(x = 0f) }) }
         Canvas(
             Modifier.fillMaxSize()
+                .hoverCursor { o -> if (handleHit(vp.toContent(o)) != null) ResizeHorizontalIcon else PointerIcon.Default }
                 // Mouse wheel scrolls (Shift = sideways), Ctrl + wheel zooms in time around the cursor.
                 .onWheelAt { d, mods, pos ->
-                    val stepPx = ch * 3
                     when {
-                        mods.isCommand -> vp.zoomBy(if (d.y < 0) 1.15f else 1f / 1.15f, 1f, pos)
-                        mods.isShiftPressed -> vp.scrollBy(d.y * stepPx, 0f)
-                        else -> vp.scrollBy(d.x * stepPx, d.y * stepPx)
+                        mods.isCommand -> vp.zoomBy(Math.pow(1.15, -d.y.toDouble()).toFloat(), 1f, pos)
+                        mods.isShiftPressed -> vp.scrollBy((d.y + d.x) * notchPx, 0f)
+                        else -> vp.scrollBy(d.x * notchPx, d.y * notchPx)
                     }
                 }
                 .pointerInput(steps, grid, rows, cw, ch) {
@@ -292,11 +301,14 @@ private fun NoteGrid(
                     var acc = Offset.Zero
                     var orig: List<Note> = emptyList()
                     var current: Set<Note> = emptySet()
+                    var startView = Offset.Zero
+                    var held: Note? = null
                     detectDragGesturesAfterLongPress(
                         onDragStart = { o0 ->
                             if (resizing || mouseBusy) { mode = 0; return@detectDragGesturesAfterLongPress }
                             val o = vp.toContent(o0)
-                            start = o; acc = Offset.Zero
+                            start = o; acc = Offset.Zero; startView = o0
+                            held = hit(o)
                             val n = hit(o)
                             if (n != null) {
                                 val sel = if (n in selection) selection else if (selection.isNotEmpty()) selection + n else setOf(n)
@@ -308,7 +320,9 @@ private fun NoteGrid(
                             }
                         },
                         onDragEnd = {
-                            if (mode == 2) marquee?.let { m -> vm.setNoteSelection(selection + inMarquee(m)) }
+                            // Held and released without dragging: open the context menu instead.
+                            if (mode != 0 && acc.getDistance() < viewConfiguration.touchSlop) openMenu(held, start, startView)
+                            else if (mode == 2) marquee?.let { m -> vm.setNoteSelection(selection + inMarquee(m)) }
                             if (mode != 0) marquee = null
                             mode = 0
                         },
@@ -339,7 +353,7 @@ private fun NoteGrid(
                     var lastClickNote: Note? = null
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = true)
-                        if (down.type != PointerType.Mouse) return@awaitEachGesture
+                        if (down.type != PointerType.Mouse || currentEvent.buttons.isTertiaryPressed) return@awaitEachGesture
                         val mods = currentEvent.keyboardModifiers
                         val additive = mods.isShiftPressed || mods.isCommand
                         val copy = mods.isCommand
@@ -383,7 +397,11 @@ private fun NoteGrid(
                             }
                         }
                         when {
-                            secondary -> if (n != null) vm.setNoteSelection(selection + n) else vm.clearNoteSelection()
+                            secondary -> {
+                                // Right-click a note: select it (unless it's already in the selection), then show the menu.
+                                if (n != null && n !in selection) vm.setNoteSelection(setOf(n))
+                                openMenu(n, downPos, down.position)
+                            }
                             mode == 2 -> marquee?.let { m -> vm.setNoteSelection((if (additive) selection else emptySet()) + inMarquee(m)) }
                             mode == 0 -> {
                                 val now = System.currentTimeMillis()
@@ -504,6 +522,51 @@ private fun NoteGrid(
             }
             }
         }
+    }
+}
+
+/** Context menu for the note grid: actions for the held note (and the selection), or for empty space. */
+private fun noteGridMenu(vm: StudioViewModel, ui: StudioUi, note: Note?, drums: Boolean, onAddHere: () -> Unit, onFit: () -> Unit): List<MenuEntry> = menu {
+    val sel = ui.noteSelection
+    val clip = ui.clip
+    if (note != null && clip != null) {
+        header(if (sel.size > 1) "${sel.size} notes" else "${if (drums) "Pad ${note.pitch - DRUM_BASE_NOTE + 1}" else Scale.noteName(note.pitch)} · velocity ${note.velocity}")
+        item("Delete", "Del", danger = true) { if (sel.isEmpty()) vm.setNotes(clip.notes - note) else vm.deleteSelectedNotes() }
+        item("Duplicate", "Ctrl+D", onClick = vm::duplicateSelectedNotes)
+        item("Copy", "Ctrl+C", onClick = vm::copyNotes)
+        item("Cut", "Ctrl+X") { vm.copyNotes(); vm.deleteSelectedNotes() }
+        if (vm.hasNoteClipboard) item("Paste", "Ctrl+V", onClick = vm::pasteNotes)
+        divider()
+        item("Quantize", "Ctrl+U") { val g = ui.stepGrid; vm.transformNotes { n -> n.copy(start = ClipOps.snap(n.start, g) % clip.lengthBeats) } }
+        item("Legato", onClick = vm::legatoSelectedNotes)
+        item("Length ÷2") { vm.transformNotes { n -> n.copy(duration = max(1.0 / 32, n.duration / 2)) } }
+        item("Length ×2") { vm.transformNotes { n -> n.copy(duration = min(clip.lengthBeats - n.start, n.duration * 2)) } }
+        if (!drums) {
+            item("Transpose +1", "↑", keepOpen = true) { vm.transformNotes { n -> n.copy(pitch = (n.pitch + 1).coerceAtMost(127)) } }
+            item("Transpose −1", "↓", keepOpen = true) { vm.transformNotes { n -> n.copy(pitch = (n.pitch - 1).coerceAtLeast(0)) } }
+            item("Octave up", "Shift+↑") { vm.transformNotes { n -> n.copy(pitch = (n.pitch + 12).coerceAtMost(127)) } }
+            item("Octave down", "Shift+↓") { vm.transformNotes { n -> n.copy(pitch = (n.pitch - 12).coerceAtLeast(0)) } }
+        }
+        header("Velocity")
+        for (v in intArrayOf(127, 100, 80, 60, 40)) item("$v", checked = sel.all { it.velocity == v }) { vm.transformNotes { n -> n.copy(velocity = v) } }
+        divider()
+        item("Select all", "Ctrl+A", onClick = vm::selectAllNotes)
+        item("Deselect", "Esc", onClick = vm::clearNoteSelection)
+    } else {
+        item(if (clip == null) "Start a clip with a note here" else "Add a note here", onClick = onAddHere)
+        if (vm.hasNoteClipboard && clip != null) item("Paste", "Ctrl+V", onClick = vm::pasteNotes)
+        if (clip != null) {
+            item("Select all", "Ctrl+A", onClick = vm::selectAllNotes)
+            if (sel.isNotEmpty()) item("Deselect", "Esc", onClick = vm::clearNoteSelection)
+            divider()
+            item("Quantize clip", "Ctrl+U") { vm.quantizeClip(ui.stepGrid) }
+            item("Double the loop", onClick = vm::duplicateLoop)
+        }
+        divider()
+        header("Grid")
+        for ((g, label) in ClipOps.GRIDS) item(label, checked = abs(g - ui.stepGrid) < 1e-6) { vm.setStepGrid(g) }
+        divider()
+        item("Zoom to fit", onClick = onFit)
     }
 }
 

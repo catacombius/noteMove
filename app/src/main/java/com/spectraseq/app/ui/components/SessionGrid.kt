@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.spectraseq.app.ui.Panel
 import com.spectraseq.app.ui.SlotRef
 import com.spectraseq.app.ui.StudioUi
 import com.spectraseq.app.ui.StudioViewModel
@@ -83,6 +84,7 @@ fun SessionGrid(
     val isPlaying by remember(engine) { derivedStateOf { engine.value.playing } }
     val blink by remember(engine) { derivedStateOf { (engine.value.estimatedBeat() * 2).toLong() % 2L == 0L } }
     val hScroll = rememberScrollState()
+    val notchPx = with(androidx.compose.ui.platform.LocalDensity.current) { wheelNotchDp.dp.toPx() }
     val vScroll = rememberScrollState()
 
     Column(modifier) {
@@ -99,7 +101,16 @@ fun SessionGrid(
                     vm.setSplit("session_scale_x", (sx * fx).coerceIn(0.6f, 2.2f))
                     vm.setSplit("session_scale_y", (sy * fy).coerceIn(0.6f, 2.2f))
                 }
-                .onWheel { d, mods -> if (mods.isShiftPressed) hScroll.dispatchRawDelta(d.y * 120f) else { vScroll.dispatchRawDelta(d.y * 120f); hScroll.dispatchRawDelta(d.x * 120f) } }
+                .onWheel { d, mods ->
+                    when {
+                        mods.isCommand -> {
+                            val f = Math.pow(1.1, -d.y.toDouble()).toFloat()
+                            vm.setSplit("session_scale_x", (sx * f).coerceIn(0.6f, 2.2f)); vm.setSplit("session_scale_y", (sy * f).coerceIn(0.6f, 2.2f))
+                        }
+                        mods.isShiftPressed -> hScroll.dispatchRawDelta((d.y + d.x) * notchPx)
+                        else -> { vScroll.dispatchRawDelta(d.y * notchPx); hScroll.dispatchRawDelta(d.x * notchPx) }
+                    }
+                }
                 .pan2D(hScroll, vScroll),
         ) {
             // Scrolling is driven by pan2D (free diagonal drag with fling), so the containers' own gestures are off.
@@ -139,19 +150,21 @@ fun SessionGrid(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TrackHeader(vm: StudioViewModel, t: Track, selected: Boolean, width: Dp, onEdit: (Track) -> Unit) {
-    var menu by remember { mutableStateOf(false) }
     val color = NM.track(t.color)
-    Box {
-        Column(
-            Modifier.width(width).clip(RoundedCornerShape(6.dp))
-                .background(if (selected) color.copy(alpha = 0.3f) else NM.surfaceHigh)
-                .border(if (selected) 2.dp else 0.dp, if (selected) color else Color.Transparent, RoundedCornerShape(6.dp))
-                .holdClickable(onClick = { vm.selectTrack(t.id) }, onLongClick = { menu = true })
-                .padding(6.dp),
-        ) {
+    ContextMenuBox(
+        {
+            trackMenu(vm, t, { onEdit(t) }) {
+                item("Select all clips") { vm.selectClipsInTrack(t.id) }
+            }
+        },
+        Modifier.width(width).clip(RoundedCornerShape(6.dp))
+            .background(if (selected) color.copy(alpha = 0.3f) else NM.surfaceHigh)
+            .border(if (selected) 2.dp else 0.dp, if (selected) color else Color.Transparent, RoundedCornerShape(6.dp)),
+        onClick = { vm.selectTrack(t.id) },
+    ) {
+        Column(Modifier.padding(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(8.dp).clip(RoundedCornerShape(4.dp)).background(color))
                 Text(" ${t.name}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = NM.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -161,17 +174,6 @@ private fun TrackHeader(vm: StudioViewModel, t: Track, selected: Boolean, width:
                 if (t.mute) Text("M", fontSize = 10.sp, color = NM.queued, fontWeight = FontWeight.Bold)
                 if (t.solo) Text("S", fontSize = 10.sp, color = NM.solo, fontWeight = FontWeight.Bold)
             }
-        }
-        DropdownMenu(menu, { menu = false }) {
-            DropdownMenuItem({ Text("Edit track…") }, { menu = false; onEdit(t) })
-            DropdownMenuItem({ Text("Select all clips") }, { menu = false; vm.selectClipsInTrack(t.id) })
-            DropdownMenuItem({ Text(if (t.mute) "Unmute" else "Mute") }, { menu = false; vm.toggleMute(t.id) })
-            DropdownMenuItem({ Text(if (t.solo) "Unsolo" else "Solo") }, { menu = false; vm.toggleSolo(t.id) })
-            DropdownMenuItem({ Text("Duplicate") }, { menu = false; vm.duplicateTrack(t.id) })
-            DropdownMenuItem({ Text("Move left") }, { menu = false; vm.moveTrack(t.id, -1) })
-            DropdownMenuItem({ Text("Move right") }, { menu = false; vm.moveTrack(t.id, 1) })
-            HorizontalDivider()
-            DropdownMenuItem({ Text("Delete", color = NM.record) }, { menu = false; vm.deleteTrack(t.id) })
         }
     }
 }
@@ -204,6 +206,8 @@ private fun ClipSlot(
     val inSelection = ref in ui.clipSelection
     val color = NM.track(t.color)
     var menu by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf(false) }
+    if (renaming && clip != null) RenameDialog("Clip name", clip.name, { renaming = false }) { vm.selectTrack(t.id); vm.selectScene(scene); vm.renameClip(it) }
     Box {
         Box(
             Modifier.width(width).height(height).clip(RoundedCornerShape(6.dp))
@@ -260,6 +264,9 @@ private fun ClipSlot(
                 DropdownMenuItem({ Text("Select all in track") }, { menu = false; vm.selectClipsInTrack(t.id) })
                 HorizontalDivider()
                 DropdownMenuItem({ Text("Launch") }, { menu = false; vm.launchClip(t.id, scene) })
+                DropdownMenuItem({ Text("Edit notes") }, { menu = false; vm.selectTrack(t.id); vm.selectScene(scene); vm.setPanel(Panel.EDIT) })
+                DropdownMenuItem({ Text("Rename…") }, { menu = false; renaming = true })
+                if (playing) DropdownMenuItem({ Text("Stop") }, { menu = false; vm.stopTrack(t.id) })
                 DropdownMenuItem({ Text("Copy") }, { menu = false; vm.clearClipSelection(); vm.toggleClipSelection(ref); vm.copySelectedClips(); vm.clearClipSelection() })
                 if (vm.hasClipClipboard) DropdownMenuItem({ Text("Paste here") }, { menu = false; vm.pasteClips() })
                 DropdownMenuItem({ Text("Duplicate") }, { menu = false; vm.duplicateClip(t.id, scene) })
@@ -276,6 +283,8 @@ private fun ClipSlot(
 @Composable
 private fun SceneButton(vm: StudioViewModel, project: Project, scene: Int, selected: Boolean, height: Dp) {
     var menu by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf(false) }
+    if (renaming) RenameDialog("Scene name", project.sceneName(scene), { renaming = false }) { vm.renameScene(scene, it) }
     Box {
         Row(
             Modifier.width(120.dp).height(height).clip(RoundedCornerShape(6.dp))
@@ -288,6 +297,8 @@ private fun SceneButton(vm: StudioViewModel, project: Project, scene: Int, selec
             Text(project.sceneName(scene), fontSize = 11.sp, color = NM.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         DropdownMenu(menu, { menu = false }) {
+            DropdownMenuItem({ Text("Launch scene") }, { menu = false; vm.launchScene(scene) })
+            DropdownMenuItem({ Text("Rename…") }, { menu = false; renaming = true })
             DropdownMenuItem({ Text("Select clips in scene") }, { menu = false; vm.selectClipsInScene(scene) })
             DropdownMenuItem({ Text("Duplicate scene") }, { menu = false; vm.duplicateScene(scene) })
             DropdownMenuItem({ Text("Insert empty scene below") }, {

@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -20,6 +21,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.spectraseq.app.app
+import com.spectraseq.app.input.TrackpadGestures
 import com.spectraseq.app.ui.components.displayName
 import com.spectraseq.app.ui.screens.LibraryScreen
 import com.spectraseq.app.ui.screens.StudioScreen
@@ -34,6 +36,19 @@ class MainActivity : ComponentActivity() {
     /** Hardware keyboard: computer MIDI keyboard and shortcuts get first look at every key. */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean = keys.handle(event) || super.dispatchKeyEvent(event)
 
+    /** Touchpad: two-finger scroll becomes wheel scrolling, three-finger swipes switch views. */
+    private val trackpad by lazy {
+        TrackpadGestures(
+            dispatchScroll = { super.dispatchGenericMotionEvent(it) },
+            dispatchTouch = { super.dispatchTouchEvent(it) },
+            notchPx = TrackpadGestures.NOTCH_DP * resources.displayMetrics.density,
+            swipeMinPx = 120f * resources.displayMetrics.density,
+            onSwipe = { if (vm.ui.value.project != null) vm.cyclePanel(it) },
+        )
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean = trackpad.onTouchEvent(ev) || super.dispatchTouchEvent(ev)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -46,7 +61,10 @@ class MainActivity : ComponentActivity() {
                 // Interface size: a separate scale for the cover and the inner screen, applied by scaling density.
                 val scale = (if (raw.mode == DeviceLayout.Mode.COVER) UiScale.cover else UiScale.inner).coerceIn(0.7f, 1.6f)
                 val base = LocalDensity.current
-                CompositionLocalProvider(LocalDensity provides Density(base.density * scale, base.fontScale)) {
+                // Touchpad scrolling stays 1:1 with the fingers at any interface size.
+                trackpad.notchPx = TrackpadGestures.NOTCH_DP * base.density * scale
+                val fontScale = base.fontScale.coerceAtMost(UiScale.MAX_SYSTEM_FONT) * UiScale.text.coerceIn(0.8f, 1.3f)
+                CompositionLocalProvider(LocalDensity provides Density(base.density * scale, fontScale)) {
                 val layout = raw.scaled(scale)
                 val hideNav by vm.hideNavBar.collectAsState()
                 LaunchedEffect(hideNav) { applyFullscreen() }

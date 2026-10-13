@@ -117,6 +117,9 @@ object NM {
 object UiScale {
     var cover by mutableFloatStateOf(1f)
     var inner by mutableFloatStateOf(1f)
+    /** Text size on top of the interface size (the system font size is capped at 115 % so labels fit their controls). */
+    var text by mutableFloatStateOf(1f)
+    const val MAX_SYSTEM_FONT = 1.15f
 }
 
 /** Loads and saves the appearance settings (theme, accent, track colours, interface size). */
@@ -130,6 +133,7 @@ object Appearance {
         NM.trackSet = TrackColorSet.entries.firstOrNull { it.name == p.getString("track_colors", null) } ?: TrackColorSet.LIVE
         UiScale.cover = p.getFloat("ui_scale_cover", 1f)
         UiScale.inner = p.getFloat("ui_scale_inner", 1f)
+        UiScale.text = p.getFloat("ui_scale_text", 1f)
     }
 
     fun save(context: Context) {
@@ -139,6 +143,7 @@ object Appearance {
             putString("track_colors", NM.trackSet.name)
             putFloat("ui_scale_cover", UiScale.cover)
             putFloat("ui_scale_inner", UiScale.inner)
+            putFloat("ui_scale_text", UiScale.text)
         }.apply()
     }
 }

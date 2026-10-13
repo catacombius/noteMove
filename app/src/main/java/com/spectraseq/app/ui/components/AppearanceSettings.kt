@@ -22,6 +22,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -82,18 +86,26 @@ fun AppearanceSection() {
     }
 
     SectionTitle("Interface size")
-    ScaleRow("Outer (cover) screen", UiScale.cover) { UiScale.cover = it; save() }
-    ScaleRow("Inner screen", UiScale.inner) { UiScale.inner = it; save() }
-    Text("Each screen keeps its own size, so folding and unfolding switches automatically.", fontSize = 11.sp, color = NM.textDim)
+    ScaleRow("Phone-size screen (cover)", UiScale.cover) { UiScale.cover = it; save() }
+    ScaleRow("Large screen (unfolded, tablet)", UiScale.inner) { UiScale.inner = it; save() }
+    ScaleRow("Text size", UiScale.text, range = 0.8f..1.3f, steps = 9) { UiScale.text = it; save() }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Each screen keeps its own size, so folding and unfolding switches automatically. Sizes apply when you let go of the slider.",
+            fontSize = 11.sp, color = NM.textDim, modifier = Modifier.weight(1f))
+        androidx.compose.material3.TextButton({ UiScale.cover = 1f; UiScale.inner = 1f; UiScale.text = 1f; save() }) { Text("Reset") }
+    }
 }
 
 @Composable
-private fun ScaleRow(label: String, value: Float, onChange: (Float) -> Unit) {
+private fun ScaleRow(label: String, value: Float, range: ClosedFloatingPointRange<Float> = 0.7f..1.6f, steps: Int = 17, onChange: (Float) -> Unit) {
+    // The whole interface rescales when this changes, slider included, so it's applied on release:
+    // changing it mid-drag would move the slider out from under the finger.
+    var preview by remember(value) { mutableStateOf(value) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label, fontSize = 13.sp, color = NM.text, modifier = Modifier.width(150.dp))
-        // Snap to 5 % steps so the layout doesn't re-flow on every pixel of the drag.
-        Slider(value, { onChange((Math.round(it * 20) / 20f)) }, valueRange = 0.8f..1.5f, steps = 13, modifier = Modifier.weight(1f))
-        Text("${Math.round(value * 100)}%", fontSize = 12.sp, color = NM.textDim, modifier = Modifier.width(44.dp).padding(start = 6.dp))
+        Slider(preview, { preview = Math.round(it * 20) / 20f }, valueRange = range, steps = steps, modifier = Modifier.weight(1f),
+            onValueChangeFinished = { if (preview != value) onChange(preview) })
+        Text("${Math.round(preview * 100)}%", fontSize = 12.sp, color = NM.textDim, modifier = Modifier.width(44.dp).padding(start = 6.dp))
     }
 }
 

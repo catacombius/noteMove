@@ -14,6 +14,18 @@ import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isMetaPressed
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.window.DialogWindowProvider
+import com.spectraseq.app.input.TrackpadGestures
 
 /*
  * Mouse and trackpad support (Bluetooth / USB mouse, Samsung DeX, keyboard covers):
@@ -88,3 +100,38 @@ val PointerKeyboardModifiers.isCommand: Boolean get() = isCtrlPressed || isMetaP
 fun Modifier.holdClickable(onClick: () -> Unit, onLongClick: (() -> Unit)? = null): Modifier =
     (if (onLongClick != null) onSecondaryClick { onLongClick() } else this)
         .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+
+/** Touchpad gestures inside a full-screen dialog (dialogs have their own window, so the activity's hook misses them). */
+@Composable
+fun DialogTrackpad() {
+    val view = LocalView.current
+    val density = LocalDensity.current.density
+    DisposableEffect(view, density) {
+        val undo = (view.parent as? DialogWindowProvider)?.window?.let { TrackpadGestures.install(it, density) } ?: {}
+        onDispose { undo() }
+    }
+}
+
+/** Pixels per wheel notch in the zoomable grids (touchpad scrolling is converted at the same rate). */
+val wheelNotchDp = TrackpadGestures.NOTCH_DP
+
+/** Mouse / touchpad cursors. */
+val ResizeHorizontalIcon: PointerIcon = PointerIcon(android.view.PointerIcon.TYPE_HORIZONTAL_DOUBLE_ARROW)
+val ResizeVerticalIcon: PointerIcon = PointerIcon(android.view.PointerIcon.TYPE_VERTICAL_DOUBLE_ARROW)
+
+/** A cursor that depends on what's under the mouse (e.g. resize arrows over a note's edge). */
+fun Modifier.hoverCursor(icon: (Offset) -> PointerIcon): Modifier = composed {
+    var current by remember { mutableStateOf(PointerIcon.Default) }
+    val f by rememberUpdatedState(icon)
+    pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) {
+                val e = awaitPointerEvent(PointerEventPass.Initial)
+                if (e.type == PointerEventType.Move || e.type == PointerEventType.Enter) {
+                    val c = e.changes.firstOrNull() ?: continue
+                    if (c.type == PointerType.Mouse && !c.pressed) current = f(c.position)
+                }
+            }
+        }
+    }.pointerHoverIcon(current)
+}

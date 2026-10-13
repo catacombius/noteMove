@@ -362,6 +362,12 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     fun selectScene(scene: Int) = _ui.update { it.copy(selectedScene = scene, stepPage = 0, noteSelection = emptySet(), editingSongClipId = null) }
     fun selectPad(pad: Int) = _ui.update { it.copy(selectedPad = pad) }
     fun setPanel(p: Panel) = _ui.update { it.copy(panel = p) }
+
+    /** Next / previous view (Tab, three-finger touchpad swipe). */
+    fun cyclePanel(direction: Int) {
+        val all = Panel.entries
+        setPanel(all[Math.floorMod(all.indexOf(_ui.value.panel) + direction, all.size)])
+    }
     fun setOctave(o: Int) = _ui.update { it.copy(octave = o.coerceIn(-1, 7)) }
     fun toggleInKey() = _ui.update { it.copy(inKey = !it.inKey) }
     fun toggleFixedVelocity() = _ui.update { it.copy(fixedVelocity = !it.fixedVelocity) }
@@ -1064,6 +1070,18 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun backToSong() = engine.backToSong()
+
+    fun playSongFrom(beat: Double) {
+        setSongCursor(beat)
+        if (engine.state.playing) engine.stop()
+        engine.playSong(beat.coerceAtLeast(0.0))
+    }
+
+    fun selectSongLane(trackId: String) = _ui.update { s ->
+        s.copy(songSelection = s.project?.arrangement?.clips?.filter { it.trackId == trackId }?.map { it.id }?.toSet() ?: emptySet())
+    }
+
+    fun selectAllSongClips() = _ui.update { s -> s.copy(songSelection = s.project?.arrangement?.clips?.map { it.id }?.toSet() ?: emptySet()) }
 
     fun selectSongClip(id: String, additive: Boolean) = _ui.update {
         it.copy(songSelection = if (additive) (if (id in it.songSelection) it.songSelection - id else it.songSelection + id) else setOf(id))

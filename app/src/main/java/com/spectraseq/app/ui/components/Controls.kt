@@ -4,6 +4,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -34,7 +36,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -136,12 +137,12 @@ fun Knob(
 
 /** Small selectable chip used for modes, grids and presets. */
 @Composable
-fun Chip(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, color: Color = NM.accent) {
+fun Chip(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, color: Color = NM.accent, onLongClick: (() -> Unit)? = null) {
     Box(
         modifier
             .clip(RoundedCornerShape(8.dp))
             .background(if (selected) color.copy(alpha = 0.9f) else NM.surfaceHigh)
-            .clickable(onClick = onClick)
+            .then(if (onLongClick != null) Modifier.holdClickable(onClick, onLongClick) else Modifier.clickable(onClick = onClick))
             .padding(horizontal = 10.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -150,15 +151,16 @@ fun Chip(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifie
 }
 
 /**
- * Vertical fader: a rounded channel that fills with the track colour, a segmented LED meter with peak
+ * Vertical fader: a rounded channel filled flat with the track colour, a segmented level meter with peak
  * hold beside it, and a round cap that shows the gain in dB while you drag. Drag, wheel or tap to set;
- * double-tap resets to 0 dB.
+ * double-tap resets to 0 dB; touch & hold or right-click for preset levels.
  */
 @Composable
 fun Fader(value: Float, onChange: (Float) -> Unit, level: Float, color: Color, modifier: Modifier = Modifier) {
     val current by rememberUpdatedState(value)
     val change by rememberUpdatedState(onChange)
     var dragging by remember { mutableStateOf(false) }
+    val faderMenu = rememberContextMenu()
     // Peak hold: jumps up instantly, falls back slowly.
     val peak = remember { FloatArray(1) }
     val peakAt = remember { LongArray(1) }
@@ -166,10 +168,11 @@ fun Fader(value: Float, onChange: (Float) -> Unit, level: Float, color: Color, m
     val meterPos = levelToMeter(level)
     if (meterPos >= peak[0] || now - peakAt[0] > 1_200_000_000L) { peak[0] = meterPos; peakAt[0] = now }
     val measurer = rememberTextMeasurer()
+    Box(modifier.width(52.dp).menuAnchor(faderMenu)) {
     Canvas(
-        modifier
-            .width(52.dp)
+        Modifier.matchParentSize()
             .onWheel { d, mods -> change((current - d.y * if (mods.isShiftPressed) 0.005f else 0.03f).coerceIn(0f, 1f)) }
+            .onSecondaryClick { faderMenu.show(it) }
             .pointerInput(Unit) {
                 detectVerticalDragGestures(
                     onDragStart = { dragging = true },
@@ -178,7 +181,7 @@ fun Fader(value: Float, onChange: (Float) -> Unit, level: Float, color: Color, m
                 ) { c, dy -> c.consume(); change((current - dy / size.height).coerceIn(0f, 1f)) }
             }
             .pointerInput(Unit) {
-                detectTapGestures(onDoubleTap = { change(0.8f) }) { o -> change((1f - o.y / size.height).coerceIn(0f, 1f)) }
+                detectTapGestures(onDoubleTap = { change(0.8f) }, onLongPress = { faderMenu.show(it) }) { o -> change((1f - o.y / size.height).coerceIn(0f, 1f)) }
             },
     ) {
         val w = size.width
@@ -188,30 +191,28 @@ fun Fader(value: Float, onChange: (Float) -> Unit, level: Float, color: Color, m
         val travel = h - capR * 2
         fun yOf(v: Float) = top + travel * (1f - v)
 
-        // LED meter (left column): 24 segments, green -> amber -> red.
+        // Level meter (left column): 24 flat segments in the track colour; the ones above 0 dBFS light red.
         val segs = 24
         val mx = 2.dp.toPx()
         val mw = 7.dp.toPx()
         val segH = travel / segs
+        val clipFrom = 60f / 66f
         for (i in 0 until segs) {
             val frac = (i + 0.5f) / segs
             val on = frac <= meterPos
-            val c = when { frac > 0.9f -> NM.record; frac > 0.72f -> NM.queued; else -> NM.play }
-            drawRoundRect(if (on) c else c.copy(alpha = 0.12f), Offset(mx, top + travel - (i + 1) * segH + 1f), Size(mw, segH - 2f), CornerRadius(2f))
+            val c = if (frac > clipFrom) NM.record else color
+            drawRoundRect(if (on) c else NM.padDim, Offset(mx, top + travel - (i + 1) * segH + 1f), Size(mw, segH - 2f), CornerRadius(2f))
         }
         val py = top + travel * (1f - peak[0])
         if (peak[0] > 0.02f) drawLine(NM.text, Offset(mx, py), Offset(mx + mw, py), 2f)
 
-        // Channel (pill) with gradient fill up to the fader position.
+        // Channel (pill) filled with one flat colour up to the fader position.
         val cx = mx + mw + 6.dp.toPx()
         val cw = w - cx - 2.dp.toPx()
         val radius = CornerRadius(cw / 2)
         drawRoundRect(NM.padDim, Offset(cx, top - cw / 4), Size(cw, travel + cw / 2), radius)
         val fy = yOf(value)
-        drawRoundRect(
-            Brush.verticalGradient(listOf(color, color.copy(alpha = 0.18f)), startY = fy, endY = top + travel),
-            Offset(cx, fy), Size(cw, top + travel + cw / 4 - fy), radius,
-        )
+        drawRoundRect(color.copy(alpha = 0.55f), Offset(cx, fy), Size(cw, top + travel + cw / 4 - fy), radius)
         // dB ticks: 0, -6, -12, -24
         for (db in intArrayOf(0, -6, -12, -24)) {
             val ty = yOf(dbToFader(db.toFloat()))
@@ -219,7 +220,7 @@ fun Fader(value: Float, onChange: (Float) -> Unit, level: Float, color: Color, m
         }
         // Cap
         val capC = Offset(cx + cw / 2, fy)
-        drawCircle(Color.Black.copy(alpha = 0.35f), capR + 2.dp.toPx(), capC + Offset(0f, 1.5.dp.toPx()))
+        drawCircle(NM.bg, capR + 2.dp.toPx(), capC)
         drawCircle(NM.surfaceHigh, capR, capC)
         drawCircle(color, capR, capC, style = Stroke(2.5.dp.toPx()))
         drawCircle(color, 3.dp.toPx(), capC)
@@ -227,11 +228,28 @@ fun Fader(value: Float, onChange: (Float) -> Unit, level: Float, color: Color, m
             val label = measurer.measure(faderDb(value), TextStyle(fontSize = 11.sp, color = NM.text, fontWeight = FontWeight.Bold))
             val bx = (capC.x - label.size.width / 2f).coerceIn(0f, w - label.size.width)
             val by = (fy - capR - label.size.height - 6.dp.toPx()).coerceAtLeast(0f)
-            drawRoundRect(NM.bg.copy(alpha = 0.9f), Offset(bx - 4.dp.toPx(), by - 2.dp.toPx()),
+            drawRoundRect(NM.bg, Offset(bx - 4.dp.toPx(), by - 2.dp.toPx()),
                 Size(label.size.width + 8.dp.toPx(), label.size.height + 4.dp.toPx()), CornerRadius(6f))
             drawText(label, topLeft = Offset(bx, by))
         }
     }
+    ContextMenuPopup(faderMenu) {
+        menu {
+            header(faderDb(current))
+            for (db in intArrayOf(3, 0, -3, -6, -12, -24)) item(if (db == 0) "0 dB (reset)" else String.format(java.util.Locale.ROOT, "%+d dB", db)) { change(dbToFader(db.toFloat())) }
+            item("−∞ (silent)") { change(0f) }
+            divider()
+            item("Fine +0.5 dB", keepOpen = true) { change(nudgeDb(current, 0.5f)) }
+            item("Fine −0.5 dB", keepOpen = true) { change(nudgeDb(current, -0.5f)) }
+        }
+    }
+    }
+}
+
+private fun nudgeDb(v: Float, db: Float): Float {
+    val gain = v * v / 0.64f
+    if (gain <= 0.0001f) return if (db > 0) dbToFader(-60f) else 0f
+    return dbToFader(20 * kotlin.math.log10(gain) + db)
 }
 
 /** Fader position 0..1 for a gain in dB (0.8 = 0 dB, gain = v² / 0.64). */
@@ -270,5 +288,28 @@ fun ToggleBox(text: String, on: Boolean, onClick: () -> Unit, modifier: Modifier
 
 @Composable
 fun ChipRow(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Row(modifier.fillMaxWidth().height(36.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) { content() }
+    Row(modifier.fillMaxWidth().height(36.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) { content() }
+}
+
+/**
+ * A title bar whose action buttons move to a second, scrollable row when the window is narrow (cover
+ * screen, split screen, large interface size), so the title never gets squeezed away.
+ */
+@Composable
+fun AdaptiveBar(
+    modifier: Modifier = Modifier,
+    breakpoint: Dp = 600.dp,
+    leading: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit,
+    actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit,
+) {
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        if (maxWidth >= breakpoint) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { leading(); actions() }
+        } else {
+            Column(Modifier.fillMaxWidth()) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { leading() }
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) { actions() }
+            }
+        }
+    }
 }

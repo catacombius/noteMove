@@ -23,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
@@ -67,6 +68,7 @@ fun SplitPane(
                 local = (local + (if (vertical) d.y else d.x) / (totalPx - handlePx)).coerceIn(minF, 1f - minF)
             }
         }.pointerInput(default) { detectTapGestures(onDoubleTap = { onF(default) }) }
+            .pointerHoverIcon(if (vertical) ResizeVerticalIcon else ResizeHorizontalIcon)
         if (vertical) {
             Column(Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxWidth().height(firstSize)) { first() }

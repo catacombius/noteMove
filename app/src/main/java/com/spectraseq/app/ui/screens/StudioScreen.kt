@@ -16,6 +16,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
@@ -52,6 +53,11 @@ import com.spectraseq.app.ui.Panel
 import com.spectraseq.app.ui.StudioUi
 import com.spectraseq.app.ui.StudioViewModel
 import com.spectraseq.app.ui.components.Chip
+import com.spectraseq.app.ui.components.ContextMenuPopup
+import com.spectraseq.app.ui.components.menuAnchor
+import com.spectraseq.app.ui.components.rememberContextMenu
+import com.spectraseq.app.ui.components.showBelow
+import com.spectraseq.app.ui.components.trackMenu
 import com.spectraseq.app.ui.components.EffectsPanel
 import com.spectraseq.app.ui.components.SampleEditor
 import com.spectraseq.app.ui.components.SplitPane
@@ -157,24 +163,29 @@ private fun CoverLayout(vm: StudioViewModel, ui: StudioUi, engine: State<EngineS
         Box(Modifier.weight(1f).fillMaxWidth().padding(8.dp)) {
             when (ui.panel) {
                 Panel.SESSION -> SessionGrid(vm, ui, engine, Modifier.fillMaxSize(), colWidth = 86.dp, onEditTrack = { a.onEditTrack(it.id) })
-                Panel.SONG -> SongView(vm, ui, engine, Modifier.fillMaxSize())
+                Panel.SONG -> SongView(vm, ui, engine, Modifier.fillMaxSize(), onEditTrack = a.onEditTrack)
                 Panel.PLAY -> PushSurface(vm, ui, engine, cols = 4, modifier = Modifier.fillMaxSize(), onSample = a.onSample, splitKey = "cover_steps")
                 Panel.EDIT -> ClipEditor(vm, ui, engine, Modifier.fillMaxSize(), compact = true)
                 Panel.SOUND -> SoundPanel(vm, ui, a.onSample, Modifier.fillMaxSize())
                 Panel.FX -> EffectsPanel(vm, ui, Modifier.fillMaxSize())
-                Panel.MIX -> MixerPanel(vm, ui, engine, Modifier.fillMaxSize())
+                Panel.MIX -> MixerPanel(vm, ui, engine, Modifier.fillMaxSize(), onEditTrack = a.onEditTrack)
             }
         }
-        NavigationBar(containerColor = NM.surface, tonalElevation = 0.dp, modifier = Modifier.height(64.dp)) {
+        // Seven tabs: below ~64dp per tab only the selected one keeps its label, so none get cut off.
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val labels = maxWidth / Panel.entries.size >= 64.dp
+        NavigationBar(containerColor = NM.surface, tonalElevation = 0.dp, modifier = Modifier.height(64.dp), windowInsets = androidx.compose.foundation.layout.WindowInsets(0)) {
             for (p in Panel.entries) {
                 NavigationBarItem(
                     selected = ui.panel == p,
                     onClick = { vm.setPanel(p) },
                     icon = { Icon(iconFor(p), p.label) },
-                    label = { Text(p.label, fontSize = 11.sp) },
+                    label = { Text(p.label, fontSize = 11.sp, maxLines = 1, softWrap = false) },
+                    alwaysShowLabel = labels,
                     colors = NavigationBarItemDefaults.colors(indicatorColor = NM.surfaceHigh, selectedIconColor = NM.accent, selectedTextColor = NM.accent),
                 )
             }
+        }
         }
     }
 }
@@ -198,9 +209,19 @@ private fun TrackStrip(vm: StudioViewModel, ui: StudioUi, a: StudioActions) {
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        for (t in project.tracks) Chip(t.name, t.id == ui.track?.id, { vm.selectTrack(t.id) }, color = NM.track(t.color))
+        for (t in project.tracks) TrackChip(vm, t, t.id == ui.track?.id) { a.onEditTrack(t.id) }
         Text("Scene ${ui.selectedScene + 1}", fontSize = 11.sp, color = NM.textDim, modifier = Modifier.padding(start = 6.dp))
         ui.track?.let { t -> Chip("•••", false, { a.onEditTrack(t.id) }) }
+    }
+}
+
+/** A track's chip: tap to select it, touch & hold or right-click for the track menu. */
+@Composable
+private fun TrackChip(vm: StudioViewModel, t: com.spectraseq.core.model.Track, selected: Boolean, onEdit: () -> Unit) {
+    val menu = rememberContextMenu()
+    Box(Modifier.menuAnchor(menu)) {
+        Chip(t.name, selected, { vm.selectTrack(t.id) }, color = NM.track(t.color), onLongClick = { menu.showBelow() })
+        ContextMenuPopup(menu) { trackMenu(vm, t, onEdit) }
     }
 }
 
@@ -213,14 +234,17 @@ private val sidePanels = listOf(Panel.SESSION, Panel.SONG, Panel.EDIT, Panel.SOU
 @Composable
 private fun PanelTabs(vm: StudioViewModel, ui: StudioUi, modifier: Modifier = Modifier) {
     val current = if (ui.panel == Panel.PLAY) Panel.SESSION else ui.panel
-    Row(modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-        for (p in sidePanels) {
-            Chip(p.label, p == current, { vm.setPanel(p) })
+    // The tabs scroll when the pane is narrow (split screen, large interface size); the track name gives way first.
+    Row(modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.weight(1f, fill = false).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            for (p in sidePanels) Chip(p.label, p == current, { vm.setPanel(p) })
         }
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.width(8.dp))
         ui.track?.let { t ->
-            Text(t.name, color = NM.track(t.color), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-            Text("  ·  ${ui.project?.sceneName(ui.selectedScene)}", color = NM.textDim, fontSize = 12.sp)
+            Text(
+                "${t.name}  ·  ${ui.project?.sceneName(ui.selectedScene)}", color = NM.track(t.color), fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
+                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f).wrapContentWidth(Alignment.End),
+            )
         }
     }
 }
@@ -232,11 +256,11 @@ private fun SidePanel(vm: StudioViewModel, ui: StudioUi, engine: State<EngineSta
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (if (ui.panel == Panel.PLAY) Panel.SESSION else ui.panel) {
                 Panel.SESSION, Panel.PLAY -> SessionGrid(vm, ui, engine, Modifier.fillMaxSize(), onEditTrack = { a.onEditTrack(it.id) })
-                Panel.SONG -> SongView(vm, ui, engine, Modifier.fillMaxSize())
+                Panel.SONG -> SongView(vm, ui, engine, Modifier.fillMaxSize(), onEditTrack = a.onEditTrack)
                 Panel.EDIT -> ClipEditor(vm, ui, engine, Modifier.fillMaxSize())
                 Panel.SOUND -> SoundPanel(vm, ui, a.onSample, Modifier.fillMaxSize())
                 Panel.FX -> EffectsPanel(vm, ui, Modifier.fillMaxSize())
-                Panel.MIX -> MixerPanel(vm, ui, engine, Modifier.fillMaxSize())
+                Panel.MIX -> MixerPanel(vm, ui, engine, Modifier.fillMaxSize(), onEditTrack = a.onEditTrack)
             }
         }
     }

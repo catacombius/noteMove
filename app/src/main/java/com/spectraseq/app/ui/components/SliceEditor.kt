@@ -122,6 +122,7 @@ fun SliceEditor(vm: StudioViewModel, ui: StudioUi, sampleId: String) {
     val loopBpm = loopBeats * 60.0 / seconds
 
     Dialog(onDismissRequest = vm::closeSlicer, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        DialogTrackpad()
         Column(Modifier.fillMaxSize().background(NM.bg).safeDrawingPadding().padding(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(vm::closeSlicer) { Icon(Icons.Filled.Close, "Close", tint = NM.text) }

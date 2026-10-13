@@ -15,6 +15,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.text.style.TextOverflow
+import com.spectraseq.core.model.DeviceHelp
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -89,7 +92,12 @@ private fun EffectsPanelContent(vm: StudioViewModel, ui: StudioUi, modifier: Mod
                 })
                 for ((category, types) in EffectType.BUILT_IN.groupBy { it.category }) {
                     Text(category.label.uppercase(), fontSize = 10.sp, color = NM.textDim, modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 2.dp))
-                    for (type in types) DropdownMenuItem({ Text(type.label) }, { addMenu = false; vm.addEffect(target, type) })
+                    for (type in types) DropdownMenuItem({
+                        Column(Modifier.padding(vertical = 4.dp)) {
+                            Text(type.label, fontSize = 14.sp, color = NM.text)
+                            Text(DeviceHelp.effect(type), fontSize = 11.sp, color = NM.textDim, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 14.sp)
+                        }
+                    }, { addMenu = false; vm.addEffect(target, type) })
                 }
                 if (userRacks.isNotEmpty() || userPatches.isNotEmpty()) {
                     Text("MY DEVICES", fontSize = 10.sp, color = NM.textDim, modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 2.dp))
@@ -128,7 +136,10 @@ private fun EffectCard(vm: StudioViewModel, target: FxTarget, slot: EffectSlot, 
                 if (index < count - 1) Chip("▶", false, { vm.moveEffect(target, slot.id, 1) })
                 Chip("⋯", false, { menu = true })
             }
-            DropdownMenu(menu, { menu = false }) {
+            DropdownMenu(menu, { menu = false }, containerColor = NM.surface) {
+                Text(DeviceHelp.effect(slot.type), fontSize = 12.sp, color = NM.textDim, lineHeight = 16.sp,
+                    modifier = Modifier.widthIn(max = 300.dp).padding(horizontal = 12.dp, vertical = 6.dp))
+                HorizontalDivider()
                 DropdownMenuItem({ Text(if (slot.enabled) "Bypass" else "Enable") }, { menu = false; vm.toggleEffect(target, slot.id) })
                 DropdownMenuItem({ Text("Duplicate") }, { menu = false; vm.duplicateEffect(target, slot.id) })
                 slot.rack?.let { r ->

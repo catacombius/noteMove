@@ -169,14 +169,16 @@ fun SampleEditor(vm: StudioViewModel, ui: StudioUi, sampleId: String) {
 
     Dialog(onDismissRequest = { if (modified) confirmClose = true else vm.closeSampleEditor() },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        DialogTrackpad()
         Column(Modifier.fillMaxSize().background(NM.bg).safeDrawingPadding().padding(8.dp)) {
             // Top bar
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            AdaptiveBar(leading = {
                 IconButton({ if (modified) confirmClose = true else vm.closeSampleEditor() }) { Icon(Icons.Filled.Close, "Close", tint = NM.text) }
                 Column(Modifier.weight(1f)) {
                     Text(ref.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = NM.text)
                     Text(String.format(Locale.ROOT, "%.2f s · %d Hz%s", data.size.toFloat() / sr, sr, if (modified) " · edited" else ""), fontSize = 11.sp, color = NM.textDim)
                 }
+            }, actions = {
                 IconButton({ undo.removeLastOrNull()?.let { data = it; modified = undo.isNotEmpty() } }, enabled = undo.isNotEmpty()) {
                     Icon(Icons.AutoMirrored.Filled.Undo, "Undo", tint = if (undo.isNotEmpty()) NM.text else NM.line)
                 }
@@ -189,7 +191,7 @@ fun SampleEditor(vm: StudioViewModel, ui: StudioUi, sampleId: String) {
                 TextButton({ if (modified) vm.toast("Save your edits first, then slice") else vm.openSlicer(sampleId) }) { Text("Slice…") }
                 TextButton({ vm.saveSampleAsNew("${ref.name} edit", SampleOps.declick(data, sr)); vm.closeSampleEditor() }, enabled = modified) { Text("Save as new") }
                 TextButton({ vm.replaceSample(sampleId, SampleOps.declick(data, sr)); vm.closeSampleEditor() }, enabled = modified) { Text("Save") }
-            }
+            })
             // Tools
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 for (t in Tool.entries) Chip(t.label, tool == t, { tool = t })

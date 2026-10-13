@@ -67,8 +67,9 @@ fun TransportBar(
     modifier: Modifier = Modifier,
 ) {
     // Narrow windows (cover screen, split screen, large interface size) get the compact bar automatically.
+    // Medium widths drop the metronome and Capture buttons (they stay in the ⋮ menu) so the set name keeps its room.
     BoxWithConstraints(modifier.fillMaxWidth()) {
-        TransportBarContent(vm, ui, engine, compact || maxWidth < 560.dp, onBack, onSettings, onExport, Modifier)
+        TransportBarContent(vm, ui, engine, compact || maxWidth < 600.dp, onBack, onSettings, onExport, Modifier, medium = maxWidth < 820.dp)
     }
 }
 
@@ -82,6 +83,7 @@ private fun TransportBarContent(
     onSettings: () -> Unit,
     onExport: () -> Unit,
     modifier: Modifier = Modifier,
+    medium: Boolean = false,
 ) {
     val project = ui.project ?: return
     val playing by remember(engine) { derivedStateOf { engine.value.playing } }
@@ -100,7 +102,24 @@ private fun TransportBarContent(
         horizontalArrangement = Arrangement.spacedBy(if (compact) 0.dp else 4.dp),
     ) {
         IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Sets", tint = NM.text) }
-        Column(Modifier.weight(1f).clickable(onClick = onSettings).padding(horizontal = 4.dp)) {
+        val setMenu = rememberContextMenu()
+        var renaming by remember { mutableStateOf(false) }
+        if (renaming) RenameDialog("Set name", project.name, { renaming = false }) { vm.renameProject(it) }
+        Column(Modifier.weight(1f).menuAnchor(setMenu).holdClickable(onClick = onSettings, onLongClick = { setMenu.showBelow() }).padding(horizontal = 4.dp)) {
+            ContextMenuPopup(setMenu) {
+                menu {
+                    header(project.name)
+                    item("Rename set…") { renaming = true }
+                    item("Set settings (tempo, key, swing)…", "Ctrl+,", onClick = onSettings)
+                    item("Export…", "Ctrl+E", onClick = onExport)
+                    item("Save now", "Ctrl+S") { vm.flushSave(); vm.toast("Saved") }
+                    divider()
+                    item("Undo", "Ctrl+Z", enabled = ui.canUndo, onClick = vm::undo)
+                    item("Redo", "Ctrl+Shift+Z", enabled = ui.canRedo, onClick = vm::redo)
+                    divider()
+                    item("Back to sets", "Esc", onClick = onBack)
+                }
+            }
             Text(project.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = NM.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 "${String.format(Locale.ROOT, "%.1f", project.tempo)} BPM · ${Scale.NOTE_NAMES[project.rootNote]} ${project.scale.label}" +
@@ -111,9 +130,11 @@ private fun TransportBarContent(
         if (!compact) {
             IconButton(onClick = vm::undo, enabled = ui.canUndo) { Icon(Icons.AutoMirrored.Filled.Undo, "Undo", tint = if (ui.canUndo) NM.text else NM.line) }
             IconButton(onClick = vm::redo, enabled = ui.canRedo) { Icon(Icons.AutoMirrored.Filled.Redo, "Redo", tint = if (ui.canRedo) NM.text else NM.line) }
-            IconButton(onClick = vm::toggleMetronome) { Icon(Icons.Filled.Timer, "Metronome", tint = if (ui.metronome) NM.accent else NM.textDim) }
-            Chip("Capture", false, vm::capture, color = NM.play)
-            Spacer(Modifier.size(4.dp))
+            if (!medium) {
+                IconButton(onClick = vm::toggleMetronome) { Icon(Icons.Filled.Timer, "Metronome", tint = if (ui.metronome) NM.accent else NM.textDim) }
+                Chip("Capture", false, vm::capture, color = NM.play)
+                Spacer(Modifier.size(4.dp))
+            }
         }
         // Hardware keyboard attached: show (and toggle) the computer MIDI keyboard.
         val config = LocalConfiguration.current
@@ -129,12 +150,45 @@ private fun TransportBarContent(
         if (vm.bluetoothOutput) {
             Text("BT ${vm.latencyMs.toInt()}ms", fontSize = 10.sp, color = NM.queued, modifier = Modifier.clickable(onClick = onSettings).padding(horizontal = 4.dp))
         }
-        RoundButton(if (playing) NM.play else NM.surfaceHigh, onClick = { if (ui.panel == com.spectraseq.app.ui.Panel.SONG) vm.toggleSongPlay() else vm.togglePlay() }) {
-            Icon(if (playing) Icons.Filled.Stop else Icons.Filled.PlayArrow, if (playing) "Stop" else "Play", tint = if (playing) Color.Black else NM.text)
+        // Touch & hold / right-click the transport buttons for more ways to play and record.
+        val playMenu = rememberContextMenu()
+        Box(Modifier.menuAnchor(playMenu)) {
+            RoundButton(if (playing) NM.play else NM.surfaceHigh, onClick = { if (ui.panel == com.spectraseq.app.ui.Panel.SONG) vm.toggleSongPlay() else vm.togglePlay() },
+                onLongClick = { playMenu.showBelow() }) {
+                Icon(if (playing) Icons.Filled.Stop else Icons.Filled.PlayArrow, if (playing) "Stop" else "Play", tint = if (playing) Color.Black else NM.text)
+            }
+            ContextMenuPopup(playMenu) {
+                menu {
+                    item(if (playing) "Stop" else "Play session", "Space") { vm.togglePlay() }
+                    item("Play song from cursor") { vm.playSongFrom(ui.songCursor) }
+                    item("Play song from the start") { vm.playSongFrom(0.0) }
+                    if (engine.value.songOverrides.isNotEmpty()) item("Back to song", onClick = vm::backToSong)
+                    divider()
+                    item("Stop all clips", onClick = vm::stopAll)
+                    item("Tap tempo", keepOpen = true, onClick = vm::tapTempo)
+                }
+            }
         }
         Spacer(Modifier.size(6.dp))
-        RoundButton(if (recording) NM.record else NM.surfaceHigh, onClick = vm::toggleRecord) {
-            Icon(Icons.Filled.FiberManualRecord, "Record", tint = if (recording) Color.White else NM.record)
+        val recMenu = rememberContextMenu()
+        Box(Modifier.menuAnchor(recMenu)) {
+            RoundButton(if (recording) NM.record else NM.surfaceHigh, onClick = vm::toggleRecord, onLongClick = { recMenu.showBelow() }) {
+                Icon(Icons.Filled.FiberManualRecord, "Record", tint = if (recording) Color.White else NM.record)
+            }
+            ContextMenuPopup(recMenu) {
+                menu {
+                    item(if (recording) "Stop recording" else "Record into the clip", "F9", onClick = vm::toggleRecord)
+                    item("Record to song", "Shift+F9", checked = ui.songRecordArmed, onClick = vm::toggleSongRecord)
+                    item("Capture MIDI", "Ctrl+Shift+C", onClick = vm::capture)
+                    divider()
+                    item("Count-in", checked = ui.countIn, onClick = vm::toggleCountIn)
+                    item("Metronome", checked = ui.metronome, onClick = vm::toggleMetronome)
+                    header("Record quantize")
+                    for ((q, label) in listOf<Pair<Double?, String>>(null to "Off", 0.25 to "1/16", 0.5 to "1/8", 1.0 to "1/4")) {
+                        item(label, checked = ui.recordQuantize == q) { vm.setRecordQuantize(q) }
+                    }
+                }
+            }
         }
         if (!compact) IconButton(onClick = onExport) { Icon(Icons.Filled.IosShare, "Export to Live", tint = NM.text) }
         Box {
@@ -145,6 +199,8 @@ private fun TransportBarContent(
                 if (compact) {
                     DropdownMenuItem({ Text("Undo") }, { more = false; vm.undo() }, enabled = ui.canUndo)
                     DropdownMenuItem({ Text("Redo") }, { more = false; vm.redo() }, enabled = ui.canRedo)
+                }
+                if (compact || medium) {
                     DropdownMenuItem({ Text(if (ui.metronome) "Metronome off" else "Metronome on") }, { more = false; vm.toggleMetronome() })
                     DropdownMenuItem({ Text("Capture MIDI") }, { more = false; vm.capture() })
                 }
@@ -156,9 +212,9 @@ private fun TransportBarContent(
 }
 
 @Composable
-fun RoundButton(color: Color, onClick: () -> Unit, content: @Composable () -> Unit) {
+fun RoundButton(color: Color, onClick: () -> Unit, onLongClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
     Box(
-        Modifier.size(44.dp).clip(CircleShape).background(color).clickable(onClick = onClick),
+        Modifier.size(44.dp).clip(CircleShape).background(color).then(if (onLongClick != null) Modifier.holdClickable(onClick, onLongClick) else Modifier.clickable(onClick = onClick)),
         contentAlignment = Alignment.Center,
     ) { content() }
 }

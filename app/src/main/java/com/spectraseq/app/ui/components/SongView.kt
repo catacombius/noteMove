@@ -47,8 +47,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -87,7 +89,7 @@ import kotlin.math.roundToInt
  * - Drag empty space to scroll, pinch to zoom.
  */
 @Composable
-fun SongView(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, modifier: Modifier = Modifier) {
+fun SongView(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, modifier: Modifier = Modifier, onEditTrack: ((String) -> Unit)? = null) {
     val project = ui.project ?: return
     val arr = project.arrangement
     val tracks = project.tracks
@@ -111,15 +113,20 @@ fun SongView(vm: StudioViewModel, ui: StudioUi, engine: State<EngineState>, modi
                     Column(Modifier.wrapContentHeight(Alignment.Top, unbounded = true).offset { IntOffset(0, -vp.scrollY.roundToInt()) }) {
                         for (t in tracks) {
                             val c = NM.track(t.color)
-                            Row(
+                            ContextMenuBox(
+                                { trackMenu(vm, t, onEditTrack?.let { e -> { e(t.id) } }) {
+                                    item("Select clips on this lane") { vm.selectSongLane(t.id) }
+                                    if (t.id in overrides) item("Back to song", onClick = vm::backToSong)
+                                } },
                                 Modifier.height(laneH * vp.zoomY).fillMaxWidth().padding(vertical = 2.dp)
-                                    .background(if (t.id == ui.track?.id) NM.surfaceHigh else NM.surface)
-                                    .clickable { vm.selectTrack(t.id) },
-                                verticalAlignment = Alignment.CenterVertically,
+                                    .background(if (t.id == ui.track?.id) NM.surfaceHigh else NM.surface),
+                                onClick = { vm.selectTrack(t.id) },
                             ) {
-                                Box(Modifier.width(4.dp).fillMaxHeight().background(c))
-                                Text(t.name, Modifier.padding(start = 6.dp), fontSize = 11.sp, color = if (t.id in overrides) NM.queued else NM.text,
-                                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(Modifier.width(4.dp).fillMaxHeight().background(c))
+                                    Text(t.name, Modifier.padding(start = 6.dp), fontSize = 11.sp, color = if (t.id in overrides) NM.queued else NM.text,
+                                        maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                }
                             }
                         }
                     }
@@ -171,6 +178,7 @@ private fun Timeline(vm: StudioViewModel, ui: StudioUi, engine: State<EngineStat
     val beatBase = with(density) { 24.dp.toPx() }
     val laneBase = with(density) { laneHdp.toPx() }
     val handlePx = with(density) { 14.dp.toPx() }
+    val notchPx = with(density) { wheelNotchDp.dp.toPx() }
     val rulerH = with(density) { 28.dp.toPx() }
     val songLen = max(max(arr.length, ui.songCursor), if (arr.loop) arr.loopEnd else 0.0) + 32.0
     SideEffect { vp.baseW = (songLen * beatBase).toFloat(); vp.baseH = laneBase * tracks.size }
@@ -181,6 +189,10 @@ private fun Timeline(vm: StudioViewModel, ui: StudioUi, engine: State<EngineStat
     val measurer = rememberTextMeasurer()
     var marquee by remember { mutableStateOf<Rect?>(null) }
     var busy by remember { mutableStateOf(false) }
+    // Context menu: hold and release without dragging, or right-click.
+    val songMenu = rememberContextMenu()
+    var menuClip by remember { mutableStateOf<SongClip?>(null) }
+    var menuBeat by remember { mutableStateOf(0.0) }
 
     /** Snap step in beats for the current zoom: 1/4 beat when zoomed in, a bar when far out. */
     fun snap(): Double = when { bw >= 96f -> 0.25; bw >= 18f -> 1.0; else -> 4.0 }
@@ -239,14 +251,16 @@ private fun Timeline(vm: StudioViewModel, ui: StudioUi, engine: State<EngineStat
                 drawLine(NM.text, Offset(cx, 0f), Offset(cx, size.height), 2f)
             }
         }
-        Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().onSizeChanged { vp.viewW = it.width.toFloat(); vp.viewH = it.height.toFloat(); vp.scrollTo() }) {
+        Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().onSizeChanged { vp.viewW = it.width.toFloat(); vp.viewH = it.height.toFloat(); vp.scrollTo(); songMenu.anchorH = it.height.toFloat() }) {
+            ContextMenuPopup(songMenu) { songMenuEntries(vm, ui, menuClip, snapBeats(menuBeat)) }
             Canvas(
                 Modifier.fillMaxSize()
+                    .hoverCursor { o -> if (edgeAt(vp.toContent(o)) != null) ResizeHorizontalIcon else PointerIcon.Default }
                     .onWheelAt { d, mods, pos ->
                         when {
-                            mods.isCommand -> vp.zoomBy(if (d.y < 0) 1.15f else 1f / 1.15f, 1f, pos)
-                            mods.isShiftPressed -> vp.scrollBy(d.y * 120f, 0f)
-                            else -> vp.scrollBy(d.x * 120f, d.y * 120f)
+                            mods.isCommand -> vp.zoomBy(Math.pow(1.15, -d.y.toDouble()).toFloat(), 1f, pos)
+                            mods.isShiftPressed -> vp.scrollBy((d.y + d.x) * notchPx, 0f)
+                            else -> vp.scrollBy(d.x * notchPx, d.y * notchPx)
                         }
                     }
                     // Tap: select a clip (or clear and move the cursor on empty space).
@@ -270,12 +284,15 @@ private fun Timeline(vm: StudioViewModel, ui: StudioUi, engine: State<EngineStat
                         var ids: Set<String> = emptySet()
                         var acc = Offset.Zero
                         var start = Offset.Zero
+                        var startView = Offset.Zero
+                        var held: SongClip? = null
                         detectDragGesturesAfterLongPress(
                             onDragStart = { o0 ->
                                 if (busy) { mode = 0; return@detectDragGesturesAfterLongPress }
                                 val o = vp.toContent(o0)
-                                start = o; acc = Offset.Zero
+                                start = o; acc = Offset.Zero; startView = o0
                                 val c = clipAt(o)
+                                held = c
                                 if (c != null) {
                                     ids = if (c.id in selection) selection else selection + c.id
                                     vm.setSongSelection(ids)
@@ -285,7 +302,9 @@ private fun Timeline(vm: StudioViewModel, ui: StudioUi, engine: State<EngineStat
                                 } else { mode = 2; marquee = Rect(o, o) }
                             },
                             onDragEnd = {
-                                if (mode == 2) marquee?.let { m -> selectInRect(vm, ui, tracks, m, bw, lh, selection) }
+                                if (mode != 0 && acc.getDistance() < viewConfiguration.touchSlop) {
+                                    menuClip = held; menuBeat = start.x / bw.toDouble(); songMenu.show(startView)
+                                } else if (mode == 2) marquee?.let { m -> selectInRect(vm, ui, tracks, m, bw, lh, selection) }
                                 if (mode != 0) marquee = null
                                 mode = 0
                             },
@@ -306,7 +325,7 @@ private fun Timeline(vm: StudioViewModel, ui: StudioUi, engine: State<EngineStat
                     .pointerInput(bw, lh, tracks) {
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = true)
-                            if (down.type != PointerType.Mouse) return@awaitEachGesture
+                            if (down.type != PointerType.Mouse || currentEvent.buttons.isTertiaryPressed) return@awaitEachGesture
                             val shift = currentEvent.keyboardModifiers.isShiftPressed
                             val secondary = currentEvent.buttons.isSecondaryPressed
                             down.consume()
@@ -336,7 +355,10 @@ private fun Timeline(vm: StudioViewModel, ui: StudioUi, engine: State<EngineStat
                                 }
                             }
                             when {
-                                secondary -> if (c != null) vm.setSongSelection(selection + c.id)
+                                secondary -> {
+                                    if (c != null && c.id !in selection) vm.setSongSelection(setOf(c.id))
+                                    menuClip = c; menuBeat = o.x / bw.toDouble(); songMenu.show(down.position)
+                                }
                                 mode == 2 -> marquee?.let { m -> selectInRect(vm, ui, tracks, m, bw, lh, if (shift) selection else emptySet()) }
                                 mode == 0 -> if (c != null) vm.selectSongClip(c.id, shift) else { vm.clearSongSelection(); vm.setSongCursor(snapBeats(o.x / bw.toDouble())) }
                             }
@@ -460,6 +482,34 @@ private fun Timeline(vm: StudioViewModel, ui: StudioUi, engine: State<EngineStat
         if (follow < 0) return@LaunchedEffect
         val x = follow * 4 * bw
         if (x < vp.scrollX || x > vp.scrollX + vp.viewW * 0.85f) vp.scrollTo(x = x - vp.viewW * 0.1f)
+    }
+}
+
+/** Context menu for the song timeline: a clip (and the selection), or a spot on the timeline. */
+private fun songMenuEntries(vm: StudioViewModel, ui: StudioUi, clip: SongClip?, beat: Double): List<MenuEntry> = menu {
+    val arr = ui.project?.arrangement ?: return@menu
+    val sel = ui.songSelection
+    if (clip != null) {
+        val c = arr.clips.firstOrNull { it.id == clip.id } ?: clip
+        header(if (sel.size > 1) "${sel.size} clips" else "${c.clip.name.ifBlank { ui.project?.track(c.trackId)?.name ?: "Clip" }} · bar ${(c.start / 4).toInt() + 1}")
+        if (sel.size <= 1) item("Edit notes") { vm.editSongClip(c.id) }
+        item("Split here") { vm.setSongCursor(beat); vm.setSongSelection(setOf(c.id)); vm.splitSongAtCursor() }
+        item("Duplicate", "Ctrl+D", onClick = vm::duplicateSongSelection)
+        item("Delete", "Del", danger = true, onClick = vm::deleteSongSelection)
+        divider()
+        item("Loop this clip") { vm.setSongLoop(c.start, c.end) }
+        item("Play from here") { vm.playSongFrom(c.start) }
+        item("Select clips on this lane") { vm.selectSongLane(c.trackId) }
+    } else {
+        header("Bar ${(beat / 4).toInt() + 1}.${(beat % 4).toInt() + 1}")
+        item("Set cursor here") { vm.setSongCursor(beat) }
+        item("Play from here") { vm.playSongFrom(beat) }
+        item("Loop start here") { vm.setSongLoop(beat, kotlin.math.max(beat + 4, arr.loopEnd)) }
+        item("Loop end here") { vm.setSongLoop(kotlin.math.min(arr.loopStart, beat - 4).coerceAtLeast(0.0), beat) }
+        divider()
+        if (arr.clips.isNotEmpty()) item("Select all clips", onClick = vm::selectAllSongClips)
+        if (sel.isNotEmpty()) item("Deselect", "Esc", onClick = vm::clearSongSelection)
+        item("Scenes → song", onClick = vm::scenesToSong)
     }
 }
 

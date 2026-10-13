@@ -19,6 +19,8 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.isPrimaryPressed
+import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -109,13 +111,26 @@ class ViewportState(
  * other handlers own: mouse input, a press already consumed (e.g. a note's length handle), and a finger
  * that rests long enough to become a touch & hold.
  */
-fun Modifier.viewportPan(state: ViewportState, panX: Boolean = true, panY: Boolean = true, requireUnconsumed: Boolean = true): Modifier = composed {
+fun Modifier.viewportPan(state: ViewportState, panX: Boolean = true, panY: Boolean = true, requireUnconsumed: Boolean = true, mouse: Boolean = false): Modifier = composed {
     val scope = rememberCoroutineScope()
-    pointerInput(state, panX, panY, requireUnconsumed) {
+    pointerInput(state, panX, panY, requireUnconsumed, mouse) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = requireUnconsumed)
             state.fling?.cancel()
-            if (down.type == PointerType.Mouse) return@awaitEachGesture
+            if (down.type == PointerType.Mouse) {
+                // Mouse: the middle button always drags the view; the left button only where nothing else uses it.
+                val buttons = currentEvent.buttons
+                if (!buttons.isTertiaryPressed && !(mouse && buttons.isPrimaryPressed)) return@awaitEachGesture
+                // A left click stays a click until the mouse actually moves.
+                val start = if (buttons.isTertiaryPressed) down.also { it.consume() }
+                    else awaitTouchSlopOrCancellation(down.id) { c, _ -> c.consume() } ?: return@awaitEachGesture
+                drag(start.id) { c ->
+                    val d = c.positionChange()
+                    state.scrollBy(if (panX) -d.x else 0f, if (panY) -d.y else 0f)
+                    c.consume()
+                }
+                return@awaitEachGesture
+            }
             var slopHit = false
             val started = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis - 40) {
                 awaitTouchSlopOrCancellation(down.id) { c, _ -> c.consume(); slopHit = true }
