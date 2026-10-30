@@ -55,13 +55,14 @@ private fun SoundPanelContent(vm: StudioViewModel, ui: StudioUi, onSample: () ->
     Column(modifier.verticalScroll(rememberScrollState())) {
         Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(track.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = NM.text)
-            for (k in TrackKind.entries) Chip(k.label, track.kind == k, { vm.changeTrackKind(k) }, color = color)
+            for (k in com.spectraseq.app.edition.Edition.trackKinds) Chip(k.label, track.kind == k, { vm.changeTrackKind(k) }, color = color)
         }
         when (track.kind) {
             TrackKind.SYNTH -> SynthEditor(vm, ui)
             TrackKind.DRUMS -> DrumEditor(vm, ui, onSample)
             TrackKind.SAMPLER -> SamplerEditor(vm, ui, onSample)
             TrackKind.SOUNDFONT -> SoundFontEditor(vm, ui)
+            TrackKind.GARDEN -> com.spectraseq.app.edition.GardenEditor(vm, ui)
         }
         SectionTitle("Track effects")
         val fx = track.fx

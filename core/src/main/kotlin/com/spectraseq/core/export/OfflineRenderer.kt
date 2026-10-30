@@ -24,7 +24,7 @@ class OfflineRenderer(private val sampleRate: Int, private val samples: SampleBa
         engine.setProject(solo)
         engine.launchClip(trackId, scene)
         renderFrames(engine, frames) // first pass, discarded
-        return renderFrames(engine, frames)
+        return renderFrames(engine, frames).also { engine.release() }
     }
 
     /** Renders the used scenes in order (each [repeats] times) plus a short tail. */
@@ -42,6 +42,7 @@ class OfflineRenderer(private val sampleRate: Int, private val samples: SampleBa
         }
         engine.stop()
         parts.add(renderFrames(engine, (tailSeconds * sampleRate).toInt()))
+        engine.release()
         onProgress(1f)
         val total = parts.sumOf { it.left.size }
         val l = FloatArray(total); val r = FloatArray(total)
@@ -73,6 +74,7 @@ class OfflineRenderer(private val sampleRate: Int, private val samples: SampleBa
         val out = renderFramesProgress(engine, total) { onProgress(it * 0.95f) }
         engine.stop()
         val tail = renderFrames(engine, (tailSeconds * sampleRate).toInt())
+        engine.release()
         onProgress(1f)
         return concat(listOf(out, tail))
     }

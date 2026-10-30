@@ -18,6 +18,21 @@ android {
         vectorDrawables { useSupportLibrary = true }
     }
 
+    // two editions: SpectraSeq as it is, and SpectraSeq Garden, with Botanica's engine as a GARDEN track instrument
+    // (installed beside it). tools/update-botanica.sh refreshes the engine (app/libs) from a Botanica checkout.
+    flavorDimensions += "edition"
+    productFlavors {
+        create("standard") {
+            dimension = "edition"
+            isDefault = true
+        }
+        create("garden") {
+            dimension = "edition"
+            applicationIdSuffix = ".garden"
+            versionNameSuffix = "-garden"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -59,6 +74,7 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.window)
     implementation(project(":core"))
+    "gardenImplementation"(files("libs/botanica-engine-release.aar"))
     implementation(libs.kotlinx.serialization.json)
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)

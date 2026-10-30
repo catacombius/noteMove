@@ -8,6 +8,7 @@ import com.spectraseq.core.model.DrumSound
 import com.spectraseq.core.model.FilterMode
 import com.spectraseq.core.model.SamplerPatch
 import com.spectraseq.core.model.SynthPatch
+import com.spectraseq.core.model.Track
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
 import kotlin.math.pow
@@ -33,6 +34,20 @@ interface Instrument {
     fun allNotesOff(hard: Boolean = false)
     /** Adds [n] frames of audio into the buffers. */
     fun render(outL: FloatArray, outR: FloatArray, n: Int)
+    /** The sequencer's clock, before each render: for instruments that follow the tempo. */
+    fun setTransport(tempo: Double, beat: Double, playing: Boolean) {}
+    /** The track's settings changed (for instruments outside this module, which keep their own copy). */
+    fun update(track: Track) {}
+    /** No longer used: free what is held outside the JVM. */
+    fun release() {}
+}
+
+/**
+ * Instruments an edition of the app adds (the Garden edition: a Botanica engine per GARDEN track). Set once at
+ * start-up, before any engine plays; every [com.spectraseq.core.engine.AudioEngine] uses it.
+ */
+object ExternalInstruments {
+    @Volatile var garden: ((track: Track, sampleRate: Float) -> Instrument)? = null
 }
 
 // ---------------------------------------------------------------------------------------------

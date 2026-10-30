@@ -28,7 +28,18 @@ data class Clip(
 }
 
 @Serializable
-enum class TrackKind(val label: String) { DRUMS("Drums"), SYNTH("Synth"), SAMPLER("Sampler"), SOUNDFONT("SoundFont") }
+enum class TrackKind(val label: String) { DRUMS("Drums"), SYNTH("Synth"), SAMPLER("Sampler"), SOUNDFONT("SoundFont"), GARDEN("Garden") }
+
+/**
+ * A Botanica sound on a GARDEN track (the SpectraSeq Garden edition): the presets it started from and every engine
+ * parameter (normalized 0..1, in the engine's order). An edition without the Garden plays such a track as a synth.
+ */
+@Serializable
+data class GardenPatch(
+    val sound: String = "",
+    val kit: String = "",
+    val values: List<Double> = emptyList(),
+)
 
 @Serializable
 data class TrackFx(
@@ -51,6 +62,7 @@ data class Track(
     val synth: SynthPatch? = null,
     val sampler: SamplerPatch? = null,
     val soundfont: SoundFontPatch? = null,
+    val garden: GardenPatch? = null,
     val volume: Float = 0.8f,
     val pan: Float = 0f,
     val mute: Boolean = false,

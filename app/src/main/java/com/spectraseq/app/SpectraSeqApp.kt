@@ -32,6 +32,7 @@ class SpectraSeqApp : Application() {
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val rate = am.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)?.toIntOrNull()?.takeIf { it in 22050..96000 } ?: 48000
         val burst = am.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)?.toIntOrNull()?.takeIf { it in 32..4096 } ?: 192
+        com.spectraseq.app.edition.Edition.install(this)
         engine = AudioEngine(rate, SampleBank(), SoundFontBank())
         output = AudioOutput(engine, rate, burst)
         repository = ProjectRepository(this)

@@ -188,7 +188,7 @@ private fun AddTrackButton(vm: StudioViewModel, width: Dp) {
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.Filled.Add, "Add track", tint = NM.textDim) }
         DropdownMenu(menu, { menu = false }) {
-            for (k in TrackKind.entries) DropdownMenuItem({ Text("${k.label} track") }, { menu = false; vm.addTrack(k) })
+            for (k in com.spectraseq.app.edition.Edition.trackKinds) DropdownMenuItem({ Text("${k.label} track") }, { menu = false; vm.addTrack(k) })
         }
     }
 }

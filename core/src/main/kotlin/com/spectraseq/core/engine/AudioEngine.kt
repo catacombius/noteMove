@@ -3,6 +3,7 @@ package com.spectraseq.core.engine
 import com.spectraseq.core.dsp.DrumMachine
 import com.spectraseq.core.dsp.EffectChain
 import com.spectraseq.core.dsp.FxContext
+import com.spectraseq.core.dsp.ExternalInstruments
 import com.spectraseq.core.dsp.Instrument
 import com.spectraseq.core.dsp.Limiter
 import com.spectraseq.core.dsp.PolySynth
@@ -238,11 +239,14 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank(), v
         if (p === project) return
         project = p
         val ids = p.tracks.map { it.id }.toSet()
+        val gone = players.filterKeys { it !in ids }
+        for (pl in gone.values) pl.instrument.release()
         players.keys.retainAll(ids)
         val ordered = LinkedHashMap<String, TrackPlayer>()
         for (t in p.tracks) {
             val existing = players[t.id]
-            ordered[t.id] = if (existing != null && existing.kind == t.kind) existing.also { it.update(t) } else TrackPlayer(t)
+            ordered[t.id] = if (existing != null && existing.kind == t.kind) existing.also { it.update(t) }
+            else { existing?.instrument?.release(); TrackPlayer(t) }
         }
         players.clear(); players.putAll(ordered)
     }
@@ -269,6 +273,7 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank(), v
         for (t in p.tracks) {
             val pl = players[t.id] ?: continue
             tl.fill(0f, 0, n); tr.fill(0f, 0, n)
+            pl.instrument.setTransport(p.tempo, if (playing) b0 else freeBeat, playing)
             pl.instrument.render(tl, tr, n)
             pl.processFx(t, tl, tr, n)
             if (t.effects.isNotEmpty()) pl.chain.process(t.effects, tl, tr, n, fxCtx)
@@ -734,6 +739,7 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank(), v
                 is DrumMachine -> i.kit = t.drumKit ?: DrumKits.KIT_808
                 is Sampler -> i.patch = t.sampler ?: SamplerPatch()
                 is SoundFontPlayer -> t.soundfont?.let { sf -> i.fontId = sf.fontId; i.bank = sf.bank; i.program = sf.program; i.gain = sf.gain }
+                else -> i.update(t)
             }
         }
 
@@ -758,6 +764,13 @@ class AudioEngine(val sampleRate: Int, val samples: SampleBank = SampleBank(), v
         TrackKind.SYNTH -> PolySynth(sr, t.synth ?: SynthPresets.KEYS)
         TrackKind.SAMPLER -> Sampler(sr, t.sampler ?: SamplerPatch(), samples)
         TrackKind.SOUNDFONT -> t.soundfont.let { sf -> SoundFontPlayer(sr, soundFonts, sf?.fontId, sf?.bank ?: 0, sf?.program ?: 0, sf?.gain ?: 0.8f) }
+        TrackKind.GARDEN -> ExternalInstruments.garden?.invoke(t, sr) ?: PolySynth(sr, t.synth ?: SynthPresets.KEYS)
+    }
+
+    /** Frees what the instruments hold outside the JVM (an engine rendered offline, once it is done). */
+    fun release() {
+        for (pl in players.values) pl.instrument.release()
+        players.clear()
     }
 
     companion object {

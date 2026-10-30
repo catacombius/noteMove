@@ -78,12 +78,39 @@ The app changes its layout as the phone folds, without restarting, so audio keep
 ## Building
 
 - **Android Studio:** open the folder, let Gradle sync, then run the `app` configuration.
-- **Command line:** `./gradlew :app:assembleDebug`. The APK is written to `app/build/outputs/apk/debug/`.
+- **Command line:** `./gradlew :app:assembleStandardDebug` (or `assembleGardenDebug`, see below). The APKs are
+  written to `app/build/outputs/apk/<edition>/debug/`.
 - **CI:** every push runs `.github/workflows/android.yml`, which runs the core tests and attaches debug and
   release APKs to the workflow run as the `SpectraSeq-apk` artifact. The release APK is signed with the
   debug key so it installs directly; set up your own signing before you publish it.
 
 Requirements: JDK 17, Android SDK 36. The minimum supported Android version is 10 (API 29).
+
+## SpectraSeq Garden
+
+A second edition of the app, built from the same code: SpectraSeq with [Botanica](https://github.com/catacombius/botanica)'s
+sound engine as a track instrument. It installs beside SpectraSeq as "SpectraSeq Garden"
+(`com.spectraseq.app.garden`).
+
+- **GARDEN tracks:** "Add track" and the track's sound panel offer a **Garden** kind. Each GARDEN track is a whole
+  Botanica (piano, strings, bass, plucks, voice, textures, the drum rack, the effects), played from clips, pads,
+  the keyboard and MIDI like any other track. It follows the set's tempo, so its glitches, delay and blooms stay in
+  time.
+- **Its sound:** pick one of Botanica's 40 factory sounds and 16 kits, then shape any of its parameters, group by
+  group. The sound is saved in the set (`Track.garden`: the presets' names and every parameter).
+- **Sets travel:** a set with GARDEN tracks opens in the standard edition too. There, those tracks play as a synth
+  until the set is opened in the Garden edition again.
+- **CPU:** each GARDEN track is a full instrument, so a few at once can be a lot for a phone.
+
+How it is put together:
+- `core` knows the GARDEN kind and its patch, and asks `ExternalInstruments.garden` for the instrument (there is a
+  synth fallback when it is unset). Every engine, including offline renders and exports, uses it.
+- The Gradle flavour `garden` (`app/src/garden/`) sets that factory to a `GardenInstrument` (one
+  `com.botanica.engine.BotanicaEngine` per track, on the audio thread) and adds the editor. The flavour `standard`
+  (`app/src/standard/`) adds nothing.
+- The engine is the AAR `app/libs/botanica-engine-release.aar`, built from Botanica's `android/botanica-engine`.
+  `tools/update-botanica.sh /path/to/botanica` rebuilds and replaces it.
+- CI builds both editions and publishes `SpectraSeq-Garden.apk` next to `SpectraSeq.apk`.
 
 ## Project layout
 

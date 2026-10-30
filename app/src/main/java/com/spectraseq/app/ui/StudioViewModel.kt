@@ -25,6 +25,7 @@ import com.spectraseq.core.model.ClipOps
 import com.spectraseq.core.model.DRUM_BASE_NOTE
 import com.spectraseq.core.model.DrumKit
 import com.spectraseq.core.model.DrumKits
+import com.spectraseq.core.model.GardenPatch
 import com.spectraseq.core.model.DrumPad
 import com.spectraseq.core.model.DrumSound
 import com.spectraseq.core.model.Note
@@ -598,6 +599,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             TrackKind.SYNTH -> Track(name = "Synth ${p.tracks.count { it.kind == kind } + 1}", kind = kind, color = color, synth = SynthPresets.PAD)
             TrackKind.SAMPLER -> Track(name = "Sampler ${p.tracks.count { it.kind == kind } + 1}", kind = kind, color = color, sampler = SamplerPatch())
             TrackKind.SOUNDFONT -> Track(name = "SoundFont ${p.tracks.count { it.kind == kind } + 1}", kind = kind, color = color, soundfont = SoundFontPatch())
+            TrackKind.GARDEN -> Track(name = "Garden ${p.tracks.count { it.kind == kind } + 1}", kind = kind, color = color, garden = GardenPatch())
         }
         edit { it.copy(tracks = it.tracks + t) }
         selectTrack(t.id)
@@ -640,7 +642,13 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             TrackKind.SYNTH -> t.copy(kind = kind, synth = t.synth ?: SynthPresets.KEYS)
             TrackKind.SAMPLER -> t.copy(kind = kind, sampler = t.sampler ?: SamplerPatch())
             TrackKind.SOUNDFONT -> t.copy(kind = kind, soundfont = t.soundfont ?: SoundFontPatch())
+            TrackKind.GARDEN -> t.copy(kind = kind, garden = t.garden ?: GardenPatch())
         }
+    }
+
+    /** The selected GARDEN track's sound (the Garden edition's editor). */
+    fun setGarden(patch: GardenPatch, undoable: Boolean = false) = edit(undoable) { p ->
+        p.updateTrack(_ui.value.track!!.id) { it.copy(garden = patch) }
     }
 
     // ------------------------------------------------------------------ sounds
@@ -674,7 +682,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                             tr.copy(drumKit = kit.withPad(pad, kit.pads[pad].copy(name = name.take(12), sound = DrumSound.SAMPLE, sampleId = ref.id, tune = 0f, decay = 1f)))
                         }
                         TrackKind.SAMPLER -> tr.copy(sampler = (tr.sampler ?: SamplerPatch()).copy(sampleId = ref.id, name = name, start = 0f, end = 1f))
-                        TrackKind.SYNTH, TrackKind.SOUNDFONT -> tr.copy(kind = TrackKind.SAMPLER, sampler = SamplerPatch(sampleId = ref.id, name = name))
+                        TrackKind.SYNTH, TrackKind.SOUNDFONT, TrackKind.GARDEN -> tr.copy(kind = TrackKind.SAMPLER, sampler = SamplerPatch(sampleId = ref.id, name = name))
                     }
                 }
             }
@@ -1049,7 +1057,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         return when (t.kind) {
             TrackKind.SAMPLER -> t.sampler?.sampleId
             TrackKind.DRUMS -> t.drumKit?.pads?.getOrNull(_ui.value.selectedPad)?.sampleId
-            TrackKind.SYNTH, TrackKind.SOUNDFONT -> null
+            TrackKind.SYNTH, TrackKind.SOUNDFONT, TrackKind.GARDEN -> null
         }
     }
 
