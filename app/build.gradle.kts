@@ -1,9 +1,27 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
+
+// The upload key for Google Play. Put its details in keystore.properties at the project root (never committed):
+//   storeFile=/path/to/spectraseq-upload.jks
+//   storePassword=...
+//   keyAlias=upload
+//   keyPassword=...
+// or in the environment variables SPECTRASEQ_STORE_FILE, SPECTRASEQ_STORE_PASSWORD, SPECTRASEQ_KEY_ALIAS and
+// SPECTRASEQ_KEY_PASSWORD. Without them, release builds are signed with the debug key as before, so they still
+// install for testing (but Google Play rejects them).
+val keystoreProps = Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+fun signingValue(prop: String, env: String): String? =
+    keystoreProps.getProperty(prop) ?: System.getenv(env)
+val releaseStoreFile = signingValue("storeFile", "SPECTRASEQ_STORE_FILE")
 
 android {
     namespace = "com.spectraseq.app"
@@ -18,14 +36,23 @@ android {
         vectorDrawables { useSupportLibrary = true }
     }
 
+    signingConfigs {
+        if (releaseStoreFile != null) {
+            create("release") {
+                storeFile = file(releaseStoreFile)
+                storePassword = signingValue("storePassword", "SPECTRASEQ_STORE_PASSWORD")
+                keyAlias = signingValue("keyAlias", "SPECTRASEQ_KEY_ALIAS")
+                keyPassword = signingValue("keyPassword", "SPECTRASEQ_KEY_PASSWORD")
+            }
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Sign with the debug key so a release build is installable out of the box.
-            // Replace with your own signing config before publishing.
-            signingConfig = signingConfigs.getByName("debug")
+            // The upload key when it is set up (see the top of this file), otherwise the debug key.
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {
