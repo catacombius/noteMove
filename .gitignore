@@ -10,3 +10,6 @@ captures/
 *.apk
 *.aab
 dist/
+keystore.properties
+*.jks
+*.keystore
